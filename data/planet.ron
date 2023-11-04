@@ -1,11 +1,16 @@
 (
     camera: (
-        position: (2.7, 1.6, 2.1),
-        orientation: (-0.07, 0.36, 0.01, 0.93),
+        position: (714.08246, -186.39484, 856.24036),
+        orientation: (0.47556788, 0.34933633, -0.23575838, 0.7721511),
         fov_y: 1.0,
-        speed: 1000.0,
+        speed: 10000.0,
     ),
-    average_luminocity: 0.3,
+    environment_map: "starmap_2020_4k.exr",
+    average_luminocity: 0.1,
     objects: [
+        (
+            path: "planet.glb",
+            transform: ((1.0, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0, 0.0), (0.0, 0.0, 1.0, 0.0)),
+        ),
     ],
 )

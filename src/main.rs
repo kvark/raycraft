@@ -2,9 +2,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use blade_graphics as gpu;
-use std::{fs, mem, path::Path, sync::Arc, time};
+use std::{fs, path::Path, sync::Arc, time};
 
-const RENDER_WHILE_LOADING: bool = true;
 const MAX_DEPTH: f32 = 1e9;
 
 #[derive(serde::Deserialize)]
@@ -223,7 +222,7 @@ impl Game {
 
         // We should be able to update TLAS and render content
         // even while it's still being loaded.
-        if self.scene_load_task.is_none() || RENDER_WHILE_LOADING {
+        if self.scene_load_task.is_none() {
             // Rebuilding every frame
             self.renderer.build_scene(
                 command_encoder,
