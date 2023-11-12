@@ -1,5 +1,16 @@
 (
-	shader_path: "../blade/blade-render/code",
-	gravity: 9.81,
-    average_luminocity: 0.1,
+    engine: (
+        shader_path: "../blade/blade-render/code",
+    ),
+    level: (
+        gravity: 9.81,
+        average_luminocity: 0.1,
+        ground: (
+            visuals: [
+                (
+                    mesh: "ground.glb",
+                ),
+            ],
+        ),
+    ),
 )

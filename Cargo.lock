@@ -1769,6 +1769,7 @@ dependencies = [
  "rapier3d",
  "ron",
  "serde",
+ "slab",
  "winit",
 ]
 
