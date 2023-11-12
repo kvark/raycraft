@@ -15,7 +15,7 @@ fn default_scale() -> f32 {
 
 #[derive(serde::Deserialize)]
 struct VisualConfig {
-    mesh: String,
+    model: String,
     #[serde(default = "default_vec")]
     pos: mint::Vector3<f32>,
     #[serde(default = "default_vec")]
@@ -87,17 +87,22 @@ impl Physics {
     }
 }
 
+struct Visual {
+    model: blade_asset::Handle<blade_render::Model>,
+    similarity: nalgebra::geometry::Similarity3<f32>,
+}
+
 struct Object {
     name: String,
     rigid_body: rapier3d::dynamics::RigidBodyHandle,
-    visuals: Vec<blade_render::Object>,
+    visuals: Vec<Visual>,
 }
 
 struct Engine {
     pacer: blade_render::util::FramePacer,
     renderer: blade_render::Renderer,
     physics: Physics,
-    scene_load_task: Option<choir::RunningTask>,
+    load_tasks: Vec<choir::RunningTask>,
     gui_painter: blade_egui::GuiPainter,
     asset_hub: blade_render::AssetHub,
     gpu_context: Arc<gpu::Context>,
@@ -186,7 +191,7 @@ impl Engine {
             pacer,
             renderer,
             physics: Physics::default(),
-            scene_load_task: None,
+            load_tasks: Vec::new(),
             gui_painter,
             asset_hub,
             gpu_context,
@@ -280,20 +285,30 @@ impl Engine {
 
         self.asset_hub.flush(command_encoder, &mut temp.buffers);
 
-        if let Some(ref task) = self.scene_load_task {
-            if task.is_done() {
-                log::info!("Scene is loaded");
-                self.scene_load_task = None;
-            }
-        }
+        self.load_tasks.retain(|task| !task.is_done());
 
         // We should be able to update TLAS and render content
         // even while it's still being loaded.
-        if self.scene_load_task.is_none() {
+        if self.load_tasks.is_empty() {
             self.render_objects.clear();
-            for object in self.objects.iter() {
-                // TODO: get transform
-                // populate self.render_objects
+            for (_, object) in self.objects.iter() {
+                let isometry = self
+                    .physics
+                    .rigid_bodies
+                    .get(object.rigid_body)
+                    .unwrap()
+                    .position();
+                for visual in object.visuals.iter() {
+                    let m = (isometry * visual.similarity).to_homogeneous();
+                    self.render_objects.push(blade_render::Object {
+                        transform: blade_graphics::Transform {
+                            x: m.column(0).into(),
+                            y: m.column(1).into(),
+                            z: m.column(2).into(),
+                        },
+                        model: visual.model,
+                    });
+                }
             }
 
             // Rebuilding every frame
@@ -315,7 +330,7 @@ impl Engine {
             );
             self.need_accumulation_reset = false;
 
-            if !self.objects.is_empty() {
+            if !self.render_objects.is_empty() {
                 self.renderer
                     .ray_trace(command_encoder, self.debug, self.ray_config);
                 if self.denoiser_enabled {
@@ -339,7 +354,7 @@ impl Engine {
                 physical_size: (physical_size.width, physical_size.height),
                 scale_factor,
             };
-            if self.scene_load_task.is_none() {
+            if self.load_tasks.is_empty() {
                 self.renderer
                     .post_proc(&mut pass, self.debug, self.post_proc_config, &[]);
             }
@@ -353,8 +368,47 @@ impl Engine {
     }
 
     #[profiling::function]
-    fn populate_hud(&mut self, _ui: &mut egui::Ui) {
-        //TODO
+    fn populate_hud(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Objects")
+            .default_open(true)
+            .show(ui, |ui| {
+                let mut selected_object_index = None;
+                for (handle, object) in self.objects.iter() {
+                    ui.selectable_value(&mut selected_object_index, Some(handle), &object.name);
+                }
+            });
+    }
+
+    fn add_object(&mut self, config: &ObjectConfig) -> usize {
+        let mut visuals = Vec::new();
+        for visual in config.visuals.iter() {
+            let (model, task) = self.asset_hub.models.load(
+                format!("data/{}", visual.model),
+                blade_render::model::Meta {
+                    generate_tangents: true,
+                },
+            );
+            visuals.push(Visual {
+                model,
+                similarity: nalgebra::geometry::Similarity3::from_parts(
+                    nalgebra::Vector3::from(visual.pos).into(),
+                    nalgebra::geometry::UnitQuaternion::from_euler_angles(
+                        visual.rot.x,
+                        visual.rot.y,
+                        visual.rot.z,
+                    ),
+                    visual.scale,
+                ),
+            });
+            self.load_tasks.push(task.clone());
+        }
+
+        let rigid_body = rapier3d::dynamics::RigidBodyBuilder::dynamic().build();
+        self.objects.insert(Object {
+            name: config.name.clone(),
+            rigid_body: self.physics.rigid_bodies.insert(rigid_body),
+            visuals,
+        })
     }
 }
 
@@ -362,7 +416,7 @@ struct Game {
     engine: Engine,
     last_physics_update: time::Instant,
     egui_context: egui::Context,
-    ground_handle: usize,
+    _ground_handle: usize,
 }
 
 impl Game {
@@ -377,13 +431,13 @@ impl Game {
         engine.physics.gravity.y = -config.level.gravity;
         engine.post_proc_config.average_luminocity = config.level.average_luminocity;
 
-        let ground_handle = 0; //TODO
+        let ground_handle = engine.add_object(&config.level.ground);
 
         Self {
             engine,
             last_physics_update: time::Instant::now(),
             egui_context: egui::Context::default(),
-            ground_handle,
+            _ground_handle: ground_handle,
         }
     }
 

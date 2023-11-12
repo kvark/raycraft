@@ -8,7 +8,7 @@
         ground: (
             visuals: [
                 (
-                    mesh: "ground.glb",
+                    model: "ground.glb",
                 ),
             ],
         ),
