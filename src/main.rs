@@ -9,24 +9,52 @@ const MAX_DEPTH: f32 = 1e9;
 #[derive(serde::Deserialize)]
 struct GameConfig {
     shader_path: String,
-}
-
-#[derive(serde::Deserialize)]
-struct ConfigObject {
-    path: String,
-    transform: gpu::Transform,
-}
-
-#[derive(serde::Deserialize)]
-struct ConfigScene {
-    environment_map: String,
+    gravity: f32,
     average_luminocity: f32,
-    objects: Vec<ConfigObject>,
+}
+
+#[derive(Default)]
+struct Physics {
+    rigid_bodies: rapier3d::dynamics::RigidBodySet,
+    integration_params: rapier3d::dynamics::IntegrationParameters,
+    island_manager: rapier3d::dynamics::IslandManager,
+    impulses: rapier3d::dynamics::ImpulseJointSet,
+    joints: rapier3d::dynamics::MultibodyJointSet,
+    solver: rapier3d::dynamics::CCDSolver,
+    colliders: rapier3d::geometry::ColliderSet,
+    broad_phase: rapier3d::geometry::BroadPhase,
+    narrow_phase: rapier3d::geometry::NarrowPhase,
+    gravity: rapier3d::math::Vector<f32>,
+    pipeline: rapier3d::pipeline::PhysicsPipeline,
+}
+
+impl Physics {
+    fn step(&mut self, dt: f32) {
+        self.integration_params.dt = dt;
+        let physics_hooks = ();
+        let event_handler = ();
+        self.pipeline.step(
+            &self.gravity,
+            &self.integration_params,
+            &mut self.island_manager,
+            &mut self.broad_phase,
+            &mut self.narrow_phase,
+            &mut self.rigid_bodies,
+            &mut self.colliders,
+            &mut self.impulses,
+            &mut self.joints,
+            &mut self.solver,
+            None, // query pipeline
+            &physics_hooks,
+            &event_handler,
+        );
+    }
 }
 
 struct Game {
     pacer: blade_render::util::FramePacer,
     renderer: blade_render::Renderer,
+    physics: Physics,
     scene_load_task: Option<choir::RunningTask>,
     gui_painter: blade_egui::GuiPainter,
     asset_hub: blade_render::AssetHub,
@@ -114,9 +142,13 @@ impl Game {
         pacer.end_frame(&context);
         let gui_painter = blade_egui::GuiPainter::new(surface_format, &context);
 
+        let mut physics = Physics::default();
+        physics.gravity.y = -config.gravity;
+
         Self {
             pacer,
             renderer,
+            physics,
             scene_load_task: None,
             gui_painter,
             asset_hub,
@@ -157,7 +189,7 @@ impl Game {
                 temporal_weight: 0.1,
             },
             post_proc_config: blade_render::PostProcConfig {
-                average_luminocity: 1.0,
+                average_luminocity: config.average_luminocity,
                 exposure_key_value: 1.0 / 9.6,
                 white_level: 1.0,
             },
@@ -173,6 +205,11 @@ impl Game {
         self.gui_painter.destroy(&self.context);
         self.renderer.destroy(&self.context);
         self.asset_hub.destroy();
+    }
+
+    #[profiling::function]
+    fn update(&mut self, dt: f32) {
+        self.physics.step(dt);
     }
 
     #[profiling::function]
@@ -301,6 +338,7 @@ fn main() {
     let mut game = Game::new(&window);
 
     let mut last_event = time::Instant::now();
+    let mut last_physics_update = time::Instant::now();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
@@ -332,6 +370,10 @@ fn main() {
                 _ => {}
             },
             winit::event::Event::RedrawRequested(_) => {
+                let physics_dt = last_physics_update.elapsed().as_secs_f32();
+                last_physics_update = time::Instant::now();
+                game.update(physics_dt);
+
                 let raw_input = egui_winit.take_egui_input(&window);
                 let egui_output = egui_ctx.run(raw_input, |egui_ctx| {
                     let frame = {

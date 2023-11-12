@@ -9,15 +9,16 @@ blade-asset = { path = "../blade/blade-asset" }
 blade-macros = { path = "../blade/blade-macros" }
 blade-graphics = { path = "../blade/blade-graphics" }
 blade-egui = { path = "../blade/blade-egui" }
-choir = { git = "https://github.com/kvark/choir", rev = "2d7c6ffb74a21a34c18c70aeb0b93a61a42eb04f" }
+choir = "0.7"
 egui = "0.23"
 egui-winit = "0.23"
 env_logger = "0.10"
-glam = "0.24"
+nalgebra = "0.32"
 log = "0.4"
 mint = { version = "0.5", features = ["serde"] }
 num_cpus = "1"
 profiling = "1"
+rapier3d = "0.17"
 ron = "0.8"
 serde = { version = "1", features = ["serde_derive"] }
 winit = "0.28"

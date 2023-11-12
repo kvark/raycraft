@@ -1,3 +1,5 @@
 (
 	shader_path: "../blade/blade-render/code",
+	gravity: 9.81,
+    average_luminocity: 0.1,
 )
