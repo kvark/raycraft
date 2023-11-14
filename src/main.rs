@@ -22,12 +22,27 @@ struct VisualConfig {
     #[serde(default = "default_scale")]
     scale: f32,
 }
+impl Default for VisualConfig {
+    fn default() -> Self {
+        Self {
+            model: String::new(),
+            pos: default_vec(),
+            rot: default_vec(),
+            scale: default_scale(),
+        }
+    }
+}
 
 #[derive(serde::Deserialize)]
 pub struct ObjectConfig {
     #[serde(default)]
     name: String,
     visuals: Vec<VisualConfig>,
+}
+
+#[derive(serde::Deserialize)]
+struct VehicleConfig {
+    model: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -43,37 +58,81 @@ struct LevelConfig {
 }
 
 #[derive(serde::Deserialize)]
+struct CameraConfig {
+    source: mint::Vector3<f32>,
+    target: mint::Vector3<f32>,
+    fov: f32,
+}
+
+#[derive(serde::Deserialize)]
 struct GameConfig {
     engine: EngineConfig,
     level: LevelConfig,
+    camera: CameraConfig,
+    vehicle: String,
+}
+
+struct Vehicle {
+    body_handle: usize,
 }
 
 struct Game {
+    // engine stuff
     engine: engine::Engine,
     last_physics_update: time::Instant,
+    // windowing
+    window: winit::window::Window,
+    egui_state: egui_winit::State,
     egui_context: egui::Context,
+    // game data
     _ground_handle: usize,
+    vehicle: Vehicle,
+    cam_config: CameraConfig,
 }
 
 impl Game {
-    fn new(window: &winit::window::Window) -> Self {
+    fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Self {
         log::info!("Initializing");
+
+        let window = winit::window::WindowBuilder::new()
+            .with_title("RayCraft")
+            .build(event_loop)
+            .unwrap();
 
         let config: GameConfig =
             ron::de::from_bytes(&fs::read("data/config.ron").expect("Unable to open the config"))
                 .expect("Unable to parse the config");
 
-        let mut engine = engine::Engine::new(window, &config.engine);
+        let mut engine = engine::Engine::new(&window, &config.engine);
         engine.set_gravity(config.level.gravity);
         engine.set_average_luminosity(config.level.average_luminocity);
 
         let ground_handle = engine.add_object(&config.level.ground);
 
+        let veh_config: VehicleConfig = ron::de::from_bytes(
+            &fs::read(format!("data/vehicles/{}.ron", config.vehicle))
+                .expect("Unable to open the vehicle config"),
+        )
+        .expect("Unable to parse the vehicle config");
+        let vehicle = Vehicle {
+            body_handle: engine.add_object(&ObjectConfig {
+                name: format!("{}/body", config.vehicle),
+                visuals: vec![VisualConfig {
+                    model: veh_config.model,
+                    ..Default::default()
+                }],
+            }),
+        };
+
         Self {
             engine,
             last_physics_update: time::Instant::now(),
+            window,
+            egui_state: egui_winit::State::new(event_loop),
             egui_context: egui::Context::default(),
             _ground_handle: ground_handle,
+            vehicle,
+            cam_config: config.camera,
         }
     }
 
@@ -81,11 +140,40 @@ impl Game {
         self.engine.destroy();
     }
 
-    fn redraw(
-        &mut self,
-        raw_input: egui::RawInput,
-        physical_size: winit::dpi::PhysicalSize<u32>,
-    ) -> (egui::PlatformOutput, time::Duration) {
+    fn on_event(&mut self, event: &winit::event::WindowEvent) -> bool {
+        let response = self.egui_state.on_event(&self.egui_context, event);
+        if response.consumed {
+            return false;
+        }
+        if response.repaint {
+            self.window.request_redraw();
+        }
+
+        match *event {
+            winit::event::WindowEvent::KeyboardInput {
+                input:
+                    winit::event::KeyboardInput {
+                        virtual_keycode: Some(key_code),
+                        state: winit::event::ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => match key_code {
+                winit::event::VirtualKeyCode::Escape => {
+                    return true;
+                }
+                _ => {}
+            },
+            winit::event::WindowEvent::CloseRequested => {
+                return true;
+            }
+            _ => {}
+        }
+        false
+    }
+
+    fn on_draw(&mut self) -> time::Duration {
+        let raw_input = self.egui_state.take_egui_input(&self.window);
         let egui_output = self.egui_context.run(raw_input, |egui_ctx| {
             let frame = {
                 let mut frame = egui::Frame::side_top_panel(&egui_ctx.style());
@@ -100,23 +188,61 @@ impl Game {
             egui::SidePanel::right("engine")
                 .frame(frame)
                 .show(egui_ctx, |ui| {
+                    egui::CollapsingHeader::new("Camera").show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Source:");
+                            ui.add(egui::DragValue::new(&mut self.cam_config.source.y));
+                            ui.add(egui::DragValue::new(&mut self.cam_config.source.z));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Target:");
+                            ui.add(egui::DragValue::new(&mut self.cam_config.target.y));
+                            ui.add(egui::DragValue::new(&mut self.cam_config.target.z));
+                        });
+                        ui.add(
+                            egui::Slider::new(&mut self.cam_config.fov, 0.5f32..=2.0f32)
+                                .text("FOV"),
+                        );
+                    });
+
                     self.engine.populate_hud(ui);
                 });
         });
 
+        self.egui_state.handle_platform_output(
+            &self.window,
+            &self.egui_context,
+            egui_output.platform_output,
+        );
         let engine_dt = self.last_physics_update.elapsed().as_secs_f32();
         self.last_physics_update = time::Instant::now();
         self.engine.update(engine_dt);
 
+        let camera = {
+            let veh_body = self.engine.get_rigid_body(self.vehicle.body_handle);
+            //TODO: `nalgebra::Point3::from(mint::Vector3)` doesn't exist?
+            let local = nalgebra::geometry::Isometry3::look_at_rh(
+                &nalgebra::Vector3::from(self.cam_config.source).into(),
+                &nalgebra::Vector3::from(self.cam_config.target).into(),
+                &nalgebra::Vector3::y_axis(),
+            );
+            engine::Camera {
+                isometry: veh_body.position() * local.inverse(),
+                fov_y: self.cam_config.fov,
+            }
+        };
+
         let primitives = self.egui_context.tessellate(egui_output.shapes);
         self.engine.render(
+            &camera,
             &primitives,
             &egui_output.textures_delta,
-            physical_size,
+            self.window.inner_size(),
             self.egui_context.pixels_per_point(),
         );
 
-        (egui_output.platform_output, egui_output.repaint_after)
+        profiling::finish_frame!();
+        egui_output.repaint_after
     }
 }
 
@@ -125,13 +251,7 @@ fn main() {
     //let _ = profiling::tracy_client::Client::start();
 
     let event_loop = winit::event_loop::EventLoop::new();
-    let window = winit::window::WindowBuilder::new()
-        .with_title("RayCraft")
-        .build(&event_loop)
-        .unwrap();
-
-    let mut game = Game::new(&window);
-    let mut egui_winit = egui_winit::State::new(&event_loop);
+    let mut game = Game::new(&event_loop);
     let mut last_event = time::Instant::now();
 
     event_loop.run(move |event, _, control_flow| {
@@ -141,34 +261,15 @@ fn main() {
 
         match event {
             winit::event::Event::RedrawEventsCleared => {
-                window.request_redraw();
+                game.window.request_redraw();
             }
-            winit::event::Event::WindowEvent { event, .. } => match event {
-                winit::event::WindowEvent::KeyboardInput {
-                    input:
-                        winit::event::KeyboardInput {
-                            virtual_keycode: Some(key_code),
-                            state: winit::event::ElementState::Pressed,
-                            ..
-                        },
-                    ..
-                } => match key_code {
-                    winit::event::VirtualKeyCode::Escape => {
-                        *control_flow = winit::event_loop::ControlFlow::Exit;
-                    }
-                    _ => {}
-                },
-                winit::event::WindowEvent::CloseRequested => {
+            winit::event::Event::WindowEvent { event, .. } => {
+                if game.on_event(&event) {
                     *control_flow = winit::event_loop::ControlFlow::Exit;
                 }
-                _ => {}
-            },
+            }
             winit::event::Event::RedrawRequested(_) => {
-                let raw_input = egui_winit.take_egui_input(&window);
-                let (raw_output, wait) = game.redraw(raw_input, window.inner_size());
-                profiling::finish_frame!();
-
-                egui_winit.handle_platform_output(&window, &game.egui_context, raw_output);
+                let wait = game.on_draw();
 
                 *control_flow = if let Some(repaint_after_instant) =
                     std::time::Instant::now().checked_add(wait)

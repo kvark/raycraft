@@ -52,6 +52,11 @@ struct Object {
     visuals: Vec<Visual>,
 }
 
+pub struct Camera {
+    pub isometry: nalgebra::Isometry3<f32>,
+    pub fov_y: f32,
+}
+
 pub struct Engine {
     pacer: blade_render::util::FramePacer,
     renderer: blade_render::Renderer,
@@ -63,7 +68,6 @@ pub struct Engine {
     environment_map: Option<blade_asset::Handle<blade_render::Texture>>,
     objects: slab::Slab<Object>,
     render_objects: Vec<blade_render::Object>,
-    camera: blade_render::Camera,
     debug: blade_render::DebugConfig,
     need_accumulation_reset: bool,
     is_debug_drawing: bool,
@@ -152,15 +156,6 @@ impl Engine {
             environment_map: None,
             objects: slab::Slab::new(),
             render_objects: Vec::new(),
-            camera: blade_render::Camera {
-                pos: [0.0; 3].into(),
-                rot: mint::Quaternion {
-                    v: [0.0; 3].into(),
-                    s: 1.0,
-                },
-                fov_y: 1.0,
-                depth: MAX_DEPTH,
-            },
             debug: blade_render::DebugConfig::default(),
             need_accumulation_reset: true,
             is_debug_drawing: false,
@@ -204,6 +199,7 @@ impl Engine {
     #[profiling::function]
     pub fn render(
         &mut self,
+        camera: &Camera,
         gui_primitives: &[egui::ClippedPrimitive],
         gui_textures: &egui::TexturesDelta,
         physical_size: winit::dpi::PhysicalSize<u32>,
@@ -277,7 +273,12 @@ impl Engine {
 
             self.renderer.prepare(
                 command_encoder,
-                &self.camera,
+                &blade_render::Camera {
+                    pos: camera.isometry.translation.vector.into(),
+                    rot: camera.isometry.rotation.into(),
+                    fov_y: camera.fov_y,
+                    depth: MAX_DEPTH,
+                },
                 self.is_debug_drawing,
                 self.debug.mouse_pos.is_some(),
                 self.need_accumulation_reset,
@@ -363,6 +364,11 @@ impl Engine {
             rigid_body: self.physics.rigid_bodies.insert(rigid_body),
             visuals,
         })
+    }
+
+    pub fn get_rigid_body(&self, handle: usize) -> &rapier3d::dynamics::RigidBody {
+        let object = &self.objects[handle];
+        &self.physics.rigid_bodies[object.rigid_body]
     }
 
     pub fn set_gravity(&mut self, force: f32) {

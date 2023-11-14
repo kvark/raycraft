@@ -13,4 +13,10 @@
             ],
         ),
     ),
+    camera: (
+        source: (0, 4, 8),
+        target: (0, 1, -2),
+        fov: 1.0,
+    ),
+    vehicle: "car",
 )
