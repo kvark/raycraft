@@ -34,10 +34,29 @@ impl Default for VisualConfig {
 }
 
 #[derive(serde::Deserialize)]
+enum Shape {
+    Ball { radius: f32 },
+    Cylinder { half_height: f32, radius: f32 },
+    Cuboid { half: mint::Vector3<f32> },
+    ConvexHull { points: Vec<mint::Vector3<f32>> },
+}
+
+#[derive(serde::Deserialize)]
+struct ColliderConfig {
+    mass: f32,
+    shape: Shape,
+    #[serde(default = "default_vec")]
+    pos: mint::Vector3<f32>,
+    #[serde(default = "default_vec")]
+    rot: mint::Vector3<f32>,
+}
+
+#[derive(serde::Deserialize)]
 pub struct ObjectConfig {
     #[serde(default)]
     name: String,
     visuals: Vec<VisualConfig>,
+    colliders: Vec<ColliderConfig>,
 }
 
 #[derive(serde::Deserialize)]
@@ -107,21 +126,42 @@ impl Game {
         engine.set_gravity(config.level.gravity);
         engine.set_average_luminosity(config.level.average_luminocity);
 
-        let ground_handle = engine.add_object(&config.level.ground);
+        let ground_handle = engine.add_object(
+            &config.level.ground,
+            nalgebra::Isometry3::default(),
+            engine::BodyType::Fixed,
+        );
 
         let veh_config: VehicleConfig = ron::de::from_bytes(
             &fs::read(format!("data/vehicles/{}.ron", config.vehicle))
                 .expect("Unable to open the vehicle config"),
         )
         .expect("Unable to parse the vehicle config");
+        let body_config = ObjectConfig {
+            name: format!("{}/body", config.vehicle),
+            visuals: vec![VisualConfig {
+                model: veh_config.model,
+                ..Default::default()
+            }],
+            colliders: vec![ColliderConfig {
+                mass: 2000.0,
+                shape: Shape::Cuboid {
+                    half: mint::Vector3 {
+                        x: 2.0,
+                        y: 1.0,
+                        z: 4.0,
+                    },
+                },
+                pos: default_vec(),
+                rot: default_vec(),
+            }],
+        };
         let vehicle = Vehicle {
-            body_handle: engine.add_object(&ObjectConfig {
-                name: format!("{}/body", config.vehicle),
-                visuals: vec![VisualConfig {
-                    model: veh_config.model,
-                    ..Default::default()
-                }],
-            }),
+            body_handle: engine.add_object(
+                &body_config,
+                nalgebra::Isometry3::translation(0.0, 1.0, 0.0),
+                engine::BodyType::Dynamic,
+            ),
         };
 
         Self {

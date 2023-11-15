@@ -1,6 +1,8 @@
 use blade_graphics as gpu;
 use std::{path::Path, sync::Arc};
 
+pub use rapier3d::dynamics::RigidBodyType as BodyType;
+
 const MAX_DEPTH: f32 = 1e9;
 
 #[derive(Default)]
@@ -49,6 +51,7 @@ struct Visual {
 struct Object {
     name: String,
     rigid_body: rapier3d::dynamics::RigidBodyHandle,
+    _colliders: Vec<rapier3d::geometry::ColliderHandle>,
     visuals: Vec<Visual>,
 }
 
@@ -334,7 +337,12 @@ impl Engine {
             });
     }
 
-    pub fn add_object(&mut self, config: &super::ObjectConfig) -> usize {
+    pub fn add_object(
+        &mut self,
+        config: &super::ObjectConfig,
+        isometry: nalgebra::Isometry3<f32>,
+        body_type: BodyType,
+    ) -> usize {
         let mut visuals = Vec::new();
         for visual in config.visuals.iter() {
             let (model, task) = self.asset_hub.models.load(
@@ -358,10 +366,48 @@ impl Engine {
             self.load_tasks.push(task.clone());
         }
 
-        let rigid_body = rapier3d::dynamics::RigidBodyBuilder::dynamic().build();
+        let rigid_body = rapier3d::dynamics::RigidBodyBuilder::new(body_type)
+            .position(isometry)
+            .build();
+        let rb_handle = self.physics.rigid_bodies.insert(rigid_body);
+
+        let mut colliders = Vec::new();
+        for cc in config.colliders.iter() {
+            let isometry = nalgebra::geometry::Isometry3::from_parts(
+                nalgebra::Vector3::from(cc.pos).into(),
+                nalgebra::geometry::UnitQuaternion::from_euler_angles(cc.rot.x, cc.rot.y, cc.rot.z),
+            );
+            let builder = match cc.shape {
+                super::Shape::Ball { radius } => rapier3d::geometry::ColliderBuilder::ball(radius),
+                super::Shape::Cylinder {
+                    half_height,
+                    radius,
+                } => rapier3d::geometry::ColliderBuilder::cylinder(half_height, radius),
+                super::Shape::Cuboid { half } => {
+                    rapier3d::geometry::ColliderBuilder::cuboid(half.x, half.y, half.z)
+                }
+                super::Shape::ConvexHull { ref points } => {
+                    let pv = points
+                        .iter()
+                        .map(|p| nalgebra::Vector3::from(*p).into())
+                        .collect::<Vec<_>>();
+                    rapier3d::geometry::ColliderBuilder::convex_hull(&pv)
+                        .expect("Unable to build convex full")
+                }
+            };
+            let collider = builder.mass(cc.mass).position(isometry).build();
+            let c_handle = self.physics.colliders.insert_with_parent(
+                collider,
+                rb_handle,
+                &mut self.physics.rigid_bodies,
+            );
+            colliders.push(c_handle);
+        }
+
         self.objects.insert(Object {
             name: config.name.clone(),
-            rigid_body: self.physics.rigid_bodies.insert(rigid_body),
+            rigid_body: rb_handle,
+            _colliders: colliders,
             visuals,
         })
     }
