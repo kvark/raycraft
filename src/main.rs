@@ -147,9 +147,9 @@ impl Game {
                 mass: 2000.0,
                 shape: Shape::Cuboid {
                     half: mint::Vector3 {
-                        x: 2.0,
-                        y: 1.0,
-                        z: 4.0,
+                        x: 1.0,
+                        y: 0.5,
+                        z: 2.0,
                     },
                 },
                 pos: default_vec(),
@@ -201,6 +201,13 @@ impl Game {
             } => match key_code {
                 winit::event::VirtualKeyCode::Escape => {
                     return true;
+                }
+                winit::event::VirtualKeyCode::W => {
+                    let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
+                    let dir = veh_isometry
+                        .rotation
+                        .transform_vector(&[0.0, 0.0, 10.0].into());
+                    self.engine.apply_impulse(self.vehicle.body_handle, dir);
                 }
                 _ => {}
             },
@@ -259,7 +266,7 @@ impl Game {
         self.engine.update(engine_dt);
 
         let camera = {
-            let veh_body = self.engine.get_rigid_body(self.vehicle.body_handle);
+            let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
             //TODO: `nalgebra::Point3::from(mint::Vector3)` doesn't exist?
             let local = nalgebra::geometry::Isometry3::look_at_rh(
                 &nalgebra::Vector3::from(self.cam_config.source).into(),
@@ -267,7 +274,7 @@ impl Game {
                 &nalgebra::Vector3::y_axis(),
             );
             engine::Camera {
-                isometry: veh_body.position() * local.inverse(),
+                isometry: veh_isometry * local.inverse(),
                 fov_y: self.cam_config.fov,
             }
         };

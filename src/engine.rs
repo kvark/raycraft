@@ -6,6 +6,12 @@ pub use rapier3d::dynamics::RigidBodyType as BodyType;
 const MAX_DEPTH: f32 = 1e9;
 
 #[derive(Default)]
+struct PhysicsVisualization {
+    bounding_boxes: bool,
+    contacts: bool,
+}
+
+#[derive(Default)]
 struct Physics {
     rigid_bodies: rapier3d::dynamics::RigidBodySet,
     integration_params: rapier3d::dynamics::IntegrationParameters,
@@ -18,6 +24,7 @@ struct Physics {
     narrow_phase: rapier3d::geometry::NarrowPhase,
     gravity: rapier3d::math::Vector<f32>,
     pipeline: rapier3d::pipeline::PhysicsPipeline,
+    visualization: PhysicsVisualization,
 }
 
 impl Physics {
@@ -40,6 +47,55 @@ impl Physics {
             &physics_hooks,
             &event_handler,
         );
+    }
+
+    fn collect_debug_lines(&self) -> Vec<blade_render::DebugLine> {
+        let mut lines = Vec::new();
+
+        if self.visualization.bounding_boxes {
+            for (_handle, collider) in self.colliders.iter() {
+                let color = 0xFFFFFF;
+                let (vertices, edges) = collider.compute_aabb().to_outline();
+                for pair in edges {
+                    lines.push(blade_render::DebugLine {
+                        a: blade_render::DebugPoint {
+                            pos: vertices[pair[0] as usize].into(),
+                            color,
+                        },
+                        b: blade_render::DebugPoint {
+                            pos: vertices[pair[1] as usize].into(),
+                            color,
+                        },
+                    });
+                }
+            }
+        }
+        if self.visualization.contacts {
+            for contact_pair in self.narrow_phase.contact_graph().interactions() {
+                for manifold in contact_pair.manifolds.iter() {
+                    for solver_contact in manifold.data.solver_contacts.iter() {
+                        let end = solver_contact.point + solver_contact.dist * manifold.data.normal;
+                        let color = if solver_contact.dist > 0.0 {
+                            0x00FF00
+                        } else {
+                            0xFF0000
+                        };
+                        lines.push(blade_render::DebugLine {
+                            a: blade_render::DebugPoint {
+                                pos: solver_contact.point.into(),
+                                color,
+                            },
+                            b: blade_render::DebugPoint {
+                                pos: end.into(),
+                                color,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+
+        lines
     }
 }
 
@@ -297,6 +353,8 @@ impl Engine {
             }
         }
 
+        let debug_lines = self.physics.collect_debug_lines();
+
         let frame = self.gpu_context.acquire_frame();
         command_encoder.init_texture(frame.texture());
 
@@ -313,8 +371,13 @@ impl Engine {
                 scale_factor,
             };
             if self.load_tasks.is_empty() {
-                self.renderer
-                    .post_proc(&mut pass, self.debug, self.post_proc_config, &[]);
+                self.renderer.post_proc(
+                    &mut pass,
+                    self.debug,
+                    self.post_proc_config,
+                    &debug_lines,
+                    &[],
+                );
             }
             self.gui_painter
                 .paint(&mut pass, gui_primitives, &screen_desc, &self.gpu_context);
@@ -327,6 +390,10 @@ impl Engine {
 
     #[profiling::function]
     pub fn populate_hud(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Debug").show(ui, |ui| {
+            ui.checkbox(&mut self.physics.visualization.bounding_boxes, "Visualize bounding boxes");
+            ui.checkbox(&mut self.physics.visualization.contacts, "Visualize contacts");
+        });
         egui::CollapsingHeader::new("Objects")
             .default_open(true)
             .show(ui, |ui| {
@@ -412,9 +479,16 @@ impl Engine {
         })
     }
 
-    pub fn get_rigid_body(&self, handle: usize) -> &rapier3d::dynamics::RigidBody {
+    pub fn get_object_isometry(&self, handle: usize) -> &nalgebra::Isometry3<f32> {
         let object = &self.objects[handle];
-        &self.physics.rigid_bodies[object.rigid_body]
+        let body = &self.physics.rigid_bodies[object.rigid_body];
+        body.position()
+    }
+
+    pub fn apply_impulse(&mut self, handle: usize, impulse: nalgebra::Vector3<f32>) {
+        let object = &self.objects[handle];
+        let body = &mut self.physics.rigid_bodies[object.rigid_body];
+        body.apply_impulse(impulse, false)
     }
 
     pub fn set_gravity(&mut self, force: f32) {
