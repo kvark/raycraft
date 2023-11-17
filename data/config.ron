@@ -24,7 +24,9 @@
         ),
     ),
     camera: (
-        source: (0, 4, 8),
+        distance: 10,
+        azimuth: 0,
+        altitude: 0.5,
         target: (0, 1, -2),
         fov: 1.0,
     ),

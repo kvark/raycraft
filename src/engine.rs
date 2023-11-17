@@ -55,7 +55,11 @@ impl Physics {
         if self.visualization.bounding_boxes {
             for (_handle, collider) in self.colliders.iter() {
                 let color = 0xFFFFFF;
-                let (vertices, edges) = collider.compute_aabb().to_outline();
+                let isometry = collider.position();
+                let (mut vertices, edges) = collider.compute_aabb().to_outline();
+                for v in vertices.iter_mut() {
+                    *v = isometry.transform_point(v);
+                }
                 for pair in edges {
                     lines.push(blade_render::DebugLine {
                         a: blade_render::DebugPoint {
@@ -309,7 +313,7 @@ impl Engine {
                     .unwrap()
                     .position();
                 for visual in object.visuals.iter() {
-                    let m = (isometry * visual.similarity).to_homogeneous();
+                    let m = (isometry * visual.similarity).to_homogeneous().transpose();
                     self.render_objects.push(blade_render::Object {
                         transform: blade_graphics::Transform {
                             x: m.column(0).into(),
@@ -391,16 +395,15 @@ impl Engine {
 
     #[profiling::function]
     pub fn populate_hud(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("Debug").show(ui, |ui| {
-            ui.checkbox(
-                &mut self.physics.visualization.bounding_boxes,
-                "Visualize bounding boxes",
-            );
-            ui.checkbox(
-                &mut self.physics.visualization.contacts,
-                "Visualize contacts",
-            );
-        });
+        egui::CollapsingHeader::new("Visualize")
+            .default_open(true)
+            .show(ui, |ui| {
+                ui.checkbox(
+                    &mut self.physics.visualization.bounding_boxes,
+                    "Bounding boxes",
+                );
+                ui.checkbox(&mut self.physics.visualization.contacts, "Contacts");
+            });
         egui::CollapsingHeader::new("Objects")
             .default_open(true)
             .show(ui, |ui| {

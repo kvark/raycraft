@@ -86,7 +86,9 @@ struct LevelConfig {
 
 #[derive(serde::Deserialize)]
 struct CameraConfig {
-    source: mint::Vector3<f32>,
+    azimuth: f32,
+    altitude: f32,
+    distance: f32,
     target: mint::Vector3<f32>,
     fov: f32,
 }
@@ -157,7 +159,7 @@ impl Game {
         let vehicle = Vehicle {
             body_handle: engine.add_object(
                 &body_config,
-                nalgebra::Isometry3::translation(0.0, 1.0, 0.0),
+                nalgebra::Isometry3::translation(0.0, 10.0, 0.0),
                 engine::BodyType::Dynamic,
             ),
         };
@@ -234,12 +236,19 @@ impl Game {
                 .frame(frame)
                 .show(egui_ctx, |ui| {
                     egui::CollapsingHeader::new("Camera").show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Source:");
-                            ui.add(egui::DragValue::new(&mut self.cam_config.source.x));
-                            ui.add(egui::DragValue::new(&mut self.cam_config.source.y));
-                            ui.add(egui::DragValue::new(&mut self.cam_config.source.z));
-                        });
+                        ui.add(
+                            egui::DragValue::new(&mut self.cam_config.distance)
+                                .prefix("Distance")
+                                .clamp_range(1.0..=100.0),
+                        );
+                        ui.add(egui::Slider::new(
+                            &mut self.cam_config.azimuth,
+                            -std::f32::consts::FRAC_PI_2..=std::f32::consts::FRAC_PI_2,
+                        ));
+                        ui.add(egui::Slider::new(
+                            &mut self.cam_config.altitude,
+                            0.01..=std::f32::consts::FRAC_PI_2,
+                        ));
                         ui.horizontal(|ui| {
                             ui.label("Target:");
                             ui.add(egui::DragValue::new(&mut self.cam_config.target.y));
@@ -267,14 +276,18 @@ impl Game {
         let camera = {
             let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
             //TODO: `nalgebra::Point3::from(mint::Vector3)` doesn't exist?
+            let cc = &self.cam_config;
+            let source = nalgebra::Vector3::from(cc.target)
+                + nalgebra::Vector3::new(cc.azimuth.sin(), cc.altitude.sin(), cc.azimuth.cos())
+                    .scale(cc.distance);
             let local = nalgebra::geometry::Isometry3::look_at_rh(
-                &nalgebra::Vector3::from(self.cam_config.source).into(),
-                &nalgebra::Vector3::from(self.cam_config.target).into(),
+                &source.into(),
+                &nalgebra::Vector3::from(cc.target).into(),
                 &nalgebra::Vector3::y_axis(),
             );
             engine::Camera {
                 isometry: veh_isometry * local.inverse(),
-                fov_y: self.cam_config.fov,
+                fov_y: cc.fov,
             }
         };
 
