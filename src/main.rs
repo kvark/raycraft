@@ -71,6 +71,8 @@ pub struct EngineConfig {
 
 #[derive(serde::Deserialize)]
 struct LevelConfig {
+    #[serde(default)]
+    environment: String,
     gravity: f32,
     average_luminocity: f32,
     ground: ObjectConfig,
@@ -123,6 +125,7 @@ impl Game {
                 .expect("Unable to parse the config");
 
         let mut engine = engine::Engine::new(&window, &config.engine);
+        engine.set_environment_map(&config.level.environment);
         engine.set_gravity(config.level.gravity);
         engine.set_average_luminosity(config.level.average_luminocity);
 
@@ -238,6 +241,7 @@ impl Game {
                     egui::CollapsingHeader::new("Camera").show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label("Source:");
+                            ui.add(egui::DragValue::new(&mut self.cam_config.source.x));
                             ui.add(egui::DragValue::new(&mut self.cam_config.source.y));
                             ui.add(egui::DragValue::new(&mut self.cam_config.source.z));
                         });

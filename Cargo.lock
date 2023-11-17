@@ -272,6 +272,7 @@ dependencies = [
  "strum",
  "texpresso",
  "zune-core",
+ "zune-hdr",
  "zune-imageprocs",
  "zune-jpeg",
  "zune-png",

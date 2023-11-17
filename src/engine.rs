@@ -136,7 +136,7 @@ pub struct Engine {
     post_proc_config: blade_render::PostProcConfig,
     track_hot_reloads: bool,
     workers: Vec<choir::WorkerHandle>,
-    _choir: Arc<choir::Choir>,
+    choir: Arc<choir::Choir>,
 }
 
 impl Engine {
@@ -238,7 +238,7 @@ impl Engine {
             },
             track_hot_reloads: false,
             workers,
-            _choir: choir,
+            choir,
         }
     }
 
@@ -252,6 +252,7 @@ impl Engine {
 
     #[profiling::function]
     pub fn update(&mut self, dt: f32) {
+        self.choir.check_panic();
         self.physics.step(dt);
     }
 
@@ -391,8 +392,14 @@ impl Engine {
     #[profiling::function]
     pub fn populate_hud(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Debug").show(ui, |ui| {
-            ui.checkbox(&mut self.physics.visualization.bounding_boxes, "Visualize bounding boxes");
-            ui.checkbox(&mut self.physics.visualization.contacts, "Visualize contacts");
+            ui.checkbox(
+                &mut self.physics.visualization.bounding_boxes,
+                "Visualize bounding boxes",
+            );
+            ui.checkbox(
+                &mut self.physics.visualization.contacts,
+                "Visualize contacts",
+            );
         });
         egui::CollapsingHeader::new("Objects")
             .default_open(true)
@@ -489,6 +496,24 @@ impl Engine {
         let object = &self.objects[handle];
         let body = &mut self.physics.rigid_bodies[object.rigid_body];
         body.apply_impulse(impulse, false)
+    }
+
+    pub fn set_environment_map(&mut self, path: &str) {
+        if path.is_empty() {
+            self.environment_map = None;
+        } else {
+            let full = format!("data/{}", path);
+            let (handle, task) = self.asset_hub.textures.load(
+                full,
+                blade_render::texture::Meta {
+                    format: blade_graphics::TextureFormat::Rgba32Float,
+                    generate_mips: false,
+                    y_flip: false,
+                },
+            );
+            self.environment_map = Some(handle);
+            self.load_tasks.push(task.clone());
+        }
     }
 
     pub fn set_gravity(&mut self, force: f32) {
