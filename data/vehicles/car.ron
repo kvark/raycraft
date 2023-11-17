@@ -1,3 +1,12 @@
 (
-	model: "car-kit/raceFuture.glb",
+    body: (
+        model: "car-kit/raceFuture.glb",
+        collider: (
+            mass: 10.0,
+            pos: (0, 0, 0),
+            shape: Cuboid(
+                half: (0.7, 0.3, 1.3),
+            ),
+        ),
+    ),
 )
