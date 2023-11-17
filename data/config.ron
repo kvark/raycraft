@@ -15,6 +15,7 @@
             colliders: [
                 (
                     mass: 100000.0,
+                    pos: (0, -1, 0),
                     shape: Cuboid(
                         half: (1000, 1, 1000),
                     ),

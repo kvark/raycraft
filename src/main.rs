@@ -60,8 +60,14 @@ pub struct ObjectConfig {
 }
 
 #[derive(serde::Deserialize)]
-struct VehicleConfig {
+struct VehicleBodyConfig {
     model: String,
+    collider: ColliderConfig,
+}
+
+#[derive(serde::Deserialize)]
+struct VehicleConfig {
+    body: VehicleBodyConfig,
 }
 
 #[derive(serde::Deserialize)]
@@ -143,21 +149,10 @@ impl Game {
         let body_config = ObjectConfig {
             name: format!("{}/body", config.vehicle),
             visuals: vec![VisualConfig {
-                model: veh_config.model,
+                model: veh_config.body.model,
                 ..Default::default()
             }],
-            colliders: vec![ColliderConfig {
-                mass: 2000.0,
-                shape: Shape::Cuboid {
-                    half: mint::Vector3 {
-                        x: 1.0,
-                        y: 0.5,
-                        z: 2.0,
-                    },
-                },
-                pos: default_vec(),
-                rot: default_vec(),
-            }],
+            colliders: vec![veh_config.body.collider],
         };
         let vehicle = Vehicle {
             body_handle: engine.add_object(
