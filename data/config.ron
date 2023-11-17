@@ -3,6 +3,7 @@
         shader_path: "../blade/blade-render/code",
     ),
     level: (
+        environment: "evangelion-1-HDR.hdr",
         gravity: 9.81,
         average_luminocity: 0.1,
         ground: (
