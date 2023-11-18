@@ -7,9 +7,11 @@
         gravity: 9.81,
         average_luminocity: 0.1,
         ground: (
+            name: "ground",
             visuals: [
                 (
                     model: "ground.glb",
+                    scale: 100,
                 ),
             ],
             colliders: [

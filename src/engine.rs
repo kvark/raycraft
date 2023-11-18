@@ -5,6 +5,14 @@ pub use rapier3d::dynamics::RigidBodyType as BodyType;
 
 const MAX_DEPTH: f32 = 1e9;
 
+fn make_quaternion(degrees: mint::Vector3<f32>) -> nalgebra::geometry::UnitQuaternion<f32> {
+    nalgebra::geometry::UnitQuaternion::from_euler_angles(
+        degrees.x.to_radians(),
+        degrees.y.to_radians(),
+        degrees.z.to_radians(),
+    )
+}
+
 #[derive(Default)]
 struct PhysicsVisualization {
     bounding_boxes: bool,
@@ -130,6 +138,7 @@ pub struct Engine {
     gpu_context: Arc<gpu::Context>,
     environment_map: Option<blade_asset::Handle<blade_render::Texture>>,
     objects: slab::Slab<Object>,
+    selected_object_index: Option<usize>,
     render_objects: Vec<blade_render::Object>,
     debug: blade_render::DebugConfig,
     need_accumulation_reset: bool,
@@ -218,6 +227,7 @@ impl Engine {
             gpu_context,
             environment_map: None,
             objects: slab::Slab::new(),
+            selected_object_index: None,
             render_objects: Vec::new(),
             debug: blade_render::DebugConfig::default(),
             need_accumulation_reset: true,
@@ -407,11 +417,20 @@ impl Engine {
         egui::CollapsingHeader::new("Objects")
             .default_open(true)
             .show(ui, |ui| {
-                let mut selected_object_index = None;
                 for (handle, object) in self.objects.iter() {
-                    ui.selectable_value(&mut selected_object_index, Some(handle), &object.name);
+                    ui.selectable_value(
+                        &mut self.selected_object_index,
+                        Some(handle),
+                        &object.name,
+                    );
                 }
             });
+        if let Some(handle) = self.selected_object_index {
+            let object = &self.objects[handle];
+            let rigid_body = &self.physics.rigid_bodies[object.rigid_body];
+            let t = rigid_body.translation();
+            ui.label(format!("Position: {:.1}, {:.1}, {:.1}", t.x, t.y, t.z));
+        }
     }
 
     pub fn add_object(
@@ -432,11 +451,7 @@ impl Engine {
                 model,
                 similarity: nalgebra::geometry::Similarity3::from_parts(
                     nalgebra::Vector3::from(visual.pos).into(),
-                    nalgebra::geometry::UnitQuaternion::from_euler_angles(
-                        visual.rot.x,
-                        visual.rot.y,
-                        visual.rot.z,
-                    ),
+                    make_quaternion(visual.rot),
                     visual.scale,
                 ),
             });
@@ -452,7 +467,7 @@ impl Engine {
         for cc in config.colliders.iter() {
             let isometry = nalgebra::geometry::Isometry3::from_parts(
                 nalgebra::Vector3::from(cc.pos).into(),
-                nalgebra::geometry::UnitQuaternion::from_euler_angles(cc.rot.x, cc.rot.y, cc.rot.z),
+                make_quaternion(cc.rot),
             );
             let builder = match cc.shape {
                 super::Shape::Ball { radius } => rapier3d::geometry::ColliderBuilder::ball(radius),
