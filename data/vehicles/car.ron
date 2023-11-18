@@ -2,7 +2,7 @@
     body: (
         visual: (
             model: "car-kit/raceFuture.glb",
-            pos: (0, 0, 0),
+            pos: (0, -0.5, 0),
             rot: (0, 180, 0),
         ),
         collider: (

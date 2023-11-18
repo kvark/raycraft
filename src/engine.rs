@@ -63,11 +63,7 @@ impl Physics {
         if self.visualization.bounding_boxes {
             for (_handle, collider) in self.colliders.iter() {
                 let color = 0xFFFFFF;
-                let isometry = collider.position();
-                let (mut vertices, edges) = collider.compute_aabb().to_outline();
-                for v in vertices.iter_mut() {
-                    *v = isometry.transform_point(v);
-                }
+                let (vertices, edges) = collider.compute_aabb().to_outline();
                 for pair in edges {
                     lines.push(blade_render::DebugLine {
                         a: blade_render::DebugPoint {
