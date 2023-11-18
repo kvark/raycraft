@@ -61,7 +61,7 @@ pub struct ObjectConfig {
 
 #[derive(serde::Deserialize)]
 struct VehicleBodyConfig {
-    model: String,
+    visual: VisualConfig,
     collider: ColliderConfig,
 }
 
@@ -150,10 +150,7 @@ impl Game {
         .expect("Unable to parse the vehicle config");
         let body_config = ObjectConfig {
             name: format!("{}/body", config.vehicle),
-            visuals: vec![VisualConfig {
-                model: veh_config.body.model,
-                ..Default::default()
-            }],
+            visuals: vec![veh_config.body.visual],
             colliders: vec![veh_config.body.collider],
         };
         let vehicle = Vehicle {
@@ -202,12 +199,23 @@ impl Game {
                 winit::event::VirtualKeyCode::Escape => {
                     return true;
                 }
-                winit::event::VirtualKeyCode::W => {
+                winit::event::VirtualKeyCode::Up => {
                     let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
                     let dir = veh_isometry
                         .rotation
                         .transform_vector(&[0.0, 0.0, 10.0].into());
                     self.engine.apply_impulse(self.vehicle.body_handle, dir);
+                }
+                winit::event::VirtualKeyCode::Down => {
+                    let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
+                    let dir = veh_isometry
+                        .rotation
+                        .transform_vector(&[0.0, 0.0, -10.0].into());
+                    self.engine.apply_impulse(self.vehicle.body_handle, dir);
+                }
+                winit::event::VirtualKeyCode::Space => {
+                    self.engine
+                        .apply_impulse(self.vehicle.body_handle, [0.0, 10.0, 0.0].into());
                 }
                 _ => {}
             },
@@ -275,10 +283,23 @@ impl Game {
 
         let camera = {
             let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
+            // Projection of the rotation of the vehicle on the Y axis
+            let projection = veh_isometry
+                .rotation
+                .quaternion()
+                .imag()
+                .dot(&nalgebra::Vector3::y_axis());
+            let base_quat =
+                nalgebra::UnitQuaternion::new_normalize(nalgebra::Quaternion::from_parts(
+                    veh_isometry.rotation.quaternion().w,
+                    nalgebra::Vector3::y_axis().scale(projection.abs()),
+                ));
+            let base =
+                nalgebra::geometry::Isometry3::from_parts(veh_isometry.translation, base_quat);
             //TODO: `nalgebra::Point3::from(mint::Vector3)` doesn't exist?
             let cc = &self.cam_config;
             let source = nalgebra::Vector3::from(cc.target)
-                + nalgebra::Vector3::new(cc.azimuth.sin(), cc.altitude.sin(), cc.azimuth.cos())
+                + nalgebra::Vector3::new(-cc.azimuth.sin(), cc.altitude.sin(), -cc.azimuth.cos())
                     .scale(cc.distance);
             let local = nalgebra::geometry::Isometry3::look_at_rh(
                 &source.into(),
@@ -286,7 +307,7 @@ impl Game {
                 &nalgebra::Vector3::y_axis(),
             );
             engine::Camera {
-                isometry: veh_isometry * local.inverse(),
+                isometry: base * local.inverse(),
                 fov_y: cc.fov,
             }
         };
