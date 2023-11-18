@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "blade-asset"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "bytemuck",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "blade-egui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blade-graphics",
  "blade-macros",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "blade-graphics"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ash",
  "ash-window",
@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "blade-macros"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "blade-render"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "bevy_mikktspace",
@@ -731,7 +731,7 @@ dependencies = [
  "miniz_oxide",
  "rayon-core",
  "smallvec",
- "zune-inflate 0.2.54",
+ "zune-inflate",
 ]
 
 [[package]]
@@ -1065,27 +1065,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "jpeg-encoder"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cf3affe27ffd9f1992690ec7575568b222abe9cb39738f6531968aca8e64906"
-
-[[package]]
 name = "js-sys"
 version = "0.3.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54c0c35952f67de54bb584e9fd912b3023117cbafc0a77d8f3dee1fb5f572fe8"
 dependencies = [
  "wasm-bindgen",
-]
-
-[[package]]
-name = "kamadak-exif"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef4fc70d0ab7e5b6bafa30216a6b48705ea964cdfc29c050f2412295eba58077"
-dependencies = [
- "mutate_once",
 ]
 
 [[package]]
@@ -1267,12 +1252,6 @@ dependencies = [
  "wasi",
  "windows-sys 0.48.0",
 ]
-
-[[package]]
-name = "mutate_once"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16cf681a23b4d0a43fc35024c176437f9dcd818db34e0f42ab456a0ee5ad497b"
 
 [[package]]
 name = "naga"
@@ -2752,74 +2731,38 @@ dependencies = [
 ]
 
 [[package]]
-name = "zune-bmp"
-version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
-dependencies = [
- "zune-core",
-]
-
-[[package]]
 name = "zune-core"
-version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
-dependencies = [
- "log",
- "serde",
-]
-
-[[package]]
-name = "zune-farbfeld"
-version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
-dependencies = [
- "zune-core",
-]
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "167b40ad31b6e3d4be67db10ecab6534f3e78ef9b32348d4efe3187700208944"
 
 [[package]]
 name = "zune-hdr"
 version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51ff474631f80b14afc6dbc6bab78702ed2de7cd6af85f7a4ab21d3b08686426"
 dependencies = [
  "zune-core",
 ]
 
 [[package]]
 name = "zune-image"
-version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
+version = "0.4.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b77a58071b28b5291de4eeb9e3adf77fb9a0879f4d548a4395a50015957bd339"
 dependencies = [
  "bytemuck",
- "jpeg-encoder",
- "kamadak-exif",
- "serde",
- "zune-bmp",
  "zune-core",
- "zune-farbfeld",
- "zune-hdr",
- "zune-jpeg",
- "zune-jpegxl",
- "zune-png",
- "zune-ppm",
- "zune-psd",
- "zune-qoi",
 ]
 
 [[package]]
 name = "zune-imageprocs"
-version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
+version = "0.4.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42c4b889e1b0e7efd13d991569b4fc483afd97a0fda59d41fe93fdbd43243210"
 dependencies = [
  "zune-core",
  "zune-image",
-]
-
-[[package]]
-name = "zune-inflate"
-version = "0.2.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
-dependencies = [
- "simd-adler32",
 ]
 
 [[package]]
@@ -2834,15 +2777,8 @@ dependencies = [
 [[package]]
 name = "zune-jpeg"
 version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
-dependencies = [
- "zune-core",
-]
-
-[[package]]
-name = "zune-jpegxl"
-version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20b34342cf79f4c6d2a5850e15ab7bcbb228a37a307b443697fe5cebe11222ad"
 dependencies = [
  "zune-core",
 ]
@@ -2850,33 +2786,9 @@ dependencies = [
 [[package]]
 name = "zune-png"
 version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5ccace4aec6125c925fdc43551c653a96aaf5f114a4e9964ae201c2d7a1c850"
 dependencies = [
  "zune-core",
- "zune-inflate 0.2.0",
-]
-
-[[package]]
-name = "zune-ppm"
-version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
-dependencies = [
- "log",
- "zune-core",
-]
-
-[[package]]
-name = "zune-psd"
-version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
-dependencies = [
- "zune-core",
-]
-
-[[package]]
-name = "zune-qoi"
-version = "0.4.0"
-source = "git+https://github.com/etemesi254/zune-image#0096e6074731c9c0cea0f24a352b1c0fe3a752b4"
-dependencies = [
- "zune-core",
+ "zune-inflate",
 ]
