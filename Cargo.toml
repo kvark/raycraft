@@ -10,6 +10,7 @@ blade-macros = { path = "../blade/blade-macros" }
 blade-graphics = { path = "../blade/blade-graphics" }
 blade-egui = { path = "../blade/blade-egui" }
 choir = "0.7"
+colorsys = "0.6"
 egui = "0.23"
 egui-winit = "0.23"
 env_logger = "0.10"
@@ -18,7 +19,7 @@ log = "0.4"
 mint = { version = "0.5", features = ["serde"] }
 num_cpus = "1"
 profiling = "1"
-rapier3d = "0.17"
+rapier3d = { version = "0.17", features = ["debug-render"] }
 ron = "0.8"
 serde = { version = "1", features = ["serde_derive"] }
 slab = "0.4"

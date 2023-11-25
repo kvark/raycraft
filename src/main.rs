@@ -60,14 +60,17 @@ pub struct ObjectConfig {
 }
 
 #[derive(serde::Deserialize)]
-struct VehicleBodyConfig {
+struct VehiclePartConfig {
     visual: VisualConfig,
     collider: ColliderConfig,
 }
 
 #[derive(serde::Deserialize)]
 struct VehicleConfig {
-    body: VehicleBodyConfig,
+    body: VehiclePartConfig,
+    wheel: VehiclePartConfig,
+    track_size: f32,
+    axles: Vec<f32>,
 }
 
 #[derive(serde::Deserialize)]
@@ -101,8 +104,15 @@ struct GameConfig {
     vehicle: String,
 }
 
+struct Axle {
+    //axis: usize,
+    wheel_left: usize,
+    wheel_right: usize,
+}
+
 struct Vehicle {
     body_handle: usize,
+    axles: Vec<Axle>,
 }
 
 struct Game {
@@ -153,13 +163,104 @@ impl Game {
             visuals: vec![veh_config.body.visual],
             colliders: vec![veh_config.body.collider],
         };
-        let vehicle = Vehicle {
+        let init_pos = nalgebra::Vector3::new(0.0, 10.0, 0.0);
+        let mut vehicle = Vehicle {
             body_handle: engine.add_object(
                 &body_config,
-                nalgebra::Isometry3::translation(0.0, 10.0, 0.0),
+                nalgebra::Isometry3::translation(init_pos.x, init_pos.y, init_pos.z),
                 engine::BodyType::Dynamic,
             ),
+            axles: Vec::new(),
         };
+        let wheel_config = ObjectConfig {
+            name: format!("{}/wheel", config.vehicle),
+            visuals: vec![veh_config.wheel.visual],
+            colliders: vec![veh_config.wheel.collider],
+        };
+        let axle_config = ObjectConfig {
+            name: format!("{}/axle", config.vehicle),
+            visuals: vec![],
+            colliders: vec![ColliderConfig {
+                mass: 1.0,
+                shape: Shape::Cylinder {
+                    half_height: 0.3,
+                    radius: 0.1,
+                },
+                pos: [0.0, 0.0, 0.0].into(),
+                rot: [0.0; 3].into(),
+            }],
+        };
+        for axle_offset in veh_config.axles {
+            let isometry_left = nalgebra::Isometry3::from_parts(
+                nalgebra::Translation3::new(
+                    init_pos.x + 0.5 * veh_config.track_size,
+                    init_pos.y,
+                    init_pos.z + axle_offset,
+                ),
+                nalgebra::UnitQuaternion::from_axis_angle(
+                    &nalgebra::Vector3::y_axis(),
+                    std::f32::consts::PI,
+                ),
+            );
+            let isometry_right = nalgebra::Isometry3::translation(
+                init_pos.x - 0.5 * veh_config.track_size,
+                init_pos.y,
+                init_pos.z + axle_offset,
+            );
+            let axle_left =
+                engine.add_object(&axle_config, isometry_left, engine::BodyType::Dynamic);
+            let axle_right =
+                engine.add_object(&axle_config, isometry_right, engine::BodyType::Dynamic);
+            let _axle_l_joint = engine.add_joint(
+                vehicle.body_handle,
+                axle_left,
+                rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::y_axis())
+                    .contacts_enabled(false)
+                    .local_anchor1(nalgebra::Point3::new(
+                        0.5 * veh_config.track_size,
+                        0.0,
+                        axle_offset,
+                    )),
+            );
+            let _axle_r_joint = engine.add_joint(
+                vehicle.body_handle,
+                axle_right,
+                rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::y_axis())
+                    .contacts_enabled(false)
+                    .local_anchor1(nalgebra::Point3::new(
+                        -0.5 * veh_config.track_size,
+                        0.0,
+                        axle_offset,
+                    )),
+            );
+
+            let axle = Axle {
+                //axis: axle_handle,
+                wheel_left: engine.add_object(
+                    &wheel_config,
+                    isometry_left,
+                    engine::BodyType::Dynamic,
+                ),
+                wheel_right: engine.add_object(
+                    &wheel_config,
+                    isometry_right,
+                    engine::BodyType::Dynamic,
+                ),
+            };
+            let _axle_l = engine.add_joint(
+                axle_left,
+                axle.wheel_left,
+                rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
+                    .contacts_enabled(false),
+            );
+            let _axle_r = engine.add_joint(
+                axle_right,
+                axle.wheel_right,
+                rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
+                    .contacts_enabled(false),
+            );
+            vehicle.axles.push(axle);
+        }
 
         Self {
             engine,
