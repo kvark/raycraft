@@ -3,7 +3,7 @@
         shader_path: "../blade/blade-render/code",
     ),
     level: (
-        environment: "evangelion-1-HDR.hdr",
+        environment: "HDR_029_Sky_Cloudy_Ref.hdr",
         gravity: 9.81,
         average_luminocity: 0.1,
         ground: (
@@ -29,8 +29,8 @@
         distance: 10,
         azimuth: 0,
         altitude: 0.5,
-        target: (0, 1, -2),
+        target: (0, 1, 1),
         fov: 1.0,
     ),
-    vehicle: "car",
+    vehicle: "raceFuture",
 )

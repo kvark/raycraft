@@ -5,6 +5,9 @@ pub use rapier3d::dynamics::RigidBodyType as BodyType;
 
 const MAX_DEPTH: f32 = 1e9;
 
+pub type ObjectHandle = usize;
+pub use rapier3d::dynamics::ImpulseJointHandle as JointHandle;
+
 fn make_quaternion(degrees: mint::Vector3<f32>) -> nalgebra::geometry::UnitQuaternion<f32> {
     nalgebra::geometry::UnitQuaternion::from_euler_angles(
         degrees.x.to_radians(),
@@ -14,9 +17,45 @@ fn make_quaternion(degrees: mint::Vector3<f32>) -> nalgebra::geometry::UnitQuate
 }
 
 #[derive(Default)]
-struct PhysicsVisualization {
-    bounding_boxes: bool,
-    contacts: bool,
+struct DebugPhysicsRender {
+    lines: Vec<blade_render::DebugLine>,
+}
+impl rapier3d::pipeline::DebugRenderBackend for DebugPhysicsRender {
+    fn draw_line(
+        &mut self,
+        _object: rapier3d::pipeline::DebugRenderObject,
+        a: nalgebra::Point3<f32>,
+        b: nalgebra::Point3<f32>,
+        color: [f32; 4],
+    ) {
+        // Looks like everybody encodes HSL(A) differently...
+        let hsl = colorsys::Hsl::new(
+            color[0] as f64,
+            color[1] as f64 * 100.0,
+            color[2] as f64 * 100.0,
+            None,
+        );
+        let rgb = colorsys::Rgb::from(&hsl);
+        let color = [
+            rgb.red(),
+            rgb.green(),
+            rgb.blue(),
+            color[3].clamp(0.0, 1.0) as f64 * 255.0,
+        ]
+        .iter()
+        .rev()
+        .fold(0u32, |u, &c| (u << 8) | c as u32);
+        self.lines.push(blade_render::DebugLine {
+            a: blade_render::DebugPoint {
+                pos: a.into(),
+                color,
+            },
+            b: blade_render::DebugPoint {
+                pos: b.into(),
+                color,
+            },
+        });
+    }
 }
 
 #[derive(Default)]
@@ -32,7 +71,7 @@ struct Physics {
     narrow_phase: rapier3d::geometry::NarrowPhase,
     gravity: rapier3d::math::Vector<f32>,
     pipeline: rapier3d::pipeline::PhysicsPipeline,
-    visualization: PhysicsVisualization,
+    debug_pipeline: rapier3d::pipeline::DebugRenderPipeline,
 }
 
 impl Physics {
@@ -56,54 +95,17 @@ impl Physics {
             &event_handler,
         );
     }
-
-    fn collect_debug_lines(&self) -> Vec<blade_render::DebugLine> {
-        let mut lines = Vec::new();
-
-        if self.visualization.bounding_boxes {
-            for (_handle, collider) in self.colliders.iter() {
-                let color = 0xFFFFFF;
-                let (vertices, edges) = collider.compute_aabb().to_outline();
-                for pair in edges {
-                    lines.push(blade_render::DebugLine {
-                        a: blade_render::DebugPoint {
-                            pos: vertices[pair[0] as usize].into(),
-                            color,
-                        },
-                        b: blade_render::DebugPoint {
-                            pos: vertices[pair[1] as usize].into(),
-                            color,
-                        },
-                    });
-                }
-            }
-        }
-        if self.visualization.contacts {
-            for contact_pair in self.narrow_phase.contact_graph().interactions() {
-                for manifold in contact_pair.manifolds.iter() {
-                    for solver_contact in manifold.data.solver_contacts.iter() {
-                        let end = solver_contact.point + solver_contact.dist * manifold.data.normal;
-                        let color = if solver_contact.dist > 0.0 {
-                            0x00FF00
-                        } else {
-                            0xFF0000
-                        };
-                        lines.push(blade_render::DebugLine {
-                            a: blade_render::DebugPoint {
-                                pos: solver_contact.point.into(),
-                                color,
-                            },
-                            b: blade_render::DebugPoint {
-                                pos: end.into(),
-                                color,
-                            },
-                        });
-                    }
-                }
-            }
-        }
-
-        lines
+    fn render_debug(&mut self) -> Vec<blade_render::DebugLine> {
+        let mut backend = DebugPhysicsRender::default();
+        self.debug_pipeline.render(
+            &mut backend,
+            &self.rigid_bodies,
+            &self.colliders,
+            &self.impulse_joints,
+            &self.multibody_joints,
+            &self.narrow_phase,
+        );
+        backend.lines
     }
 }
 
@@ -115,6 +117,7 @@ struct Visual {
 struct Object {
     name: String,
     rigid_body: rapier3d::dynamics::RigidBodyHandle,
+    prev_isometry: nalgebra::Isometry3<f32>,
     _colliders: Vec<rapier3d::geometry::ColliderHandle>,
     visuals: Vec<Visual>,
 }
@@ -134,7 +137,7 @@ pub struct Engine {
     gpu_context: Arc<gpu::Context>,
     environment_map: Option<blade_asset::Handle<blade_render::Texture>>,
     objects: slab::Slab<Object>,
-    selected_object_index: Option<usize>,
+    selected_object_index: Option<ObjectHandle>,
     render_objects: Vec<blade_render::Object>,
     debug: blade_render::DebugConfig,
     need_accumulation_reset: bool,
@@ -212,11 +215,13 @@ impl Engine {
         pacer.end_frame(&gpu_context);
 
         let gui_painter = blade_egui::GuiPainter::new(surface_format, &gpu_context);
+        let mut physics = Physics::default();
+        physics.debug_pipeline.mode = rapier3d::pipeline::DebugRenderMode::empty();
 
         Self {
             pacer,
             renderer,
-            physics: Physics::default(),
+            physics,
             load_tasks: Vec::new(),
             gui_painter,
             asset_hub,
@@ -238,7 +243,7 @@ impl Engine {
             },
             denoiser_enabled: true,
             denoiser_config: blade_render::DenoiserConfig {
-                num_passes: 3,
+                num_passes: 4,
                 temporal_weight: 0.1,
             },
             post_proc_config: blade_render::PostProcConfig {
@@ -311,7 +316,7 @@ impl Engine {
         // even while it's still being loaded.
         if self.load_tasks.is_empty() {
             self.render_objects.clear();
-            for (_, object) in self.objects.iter() {
+            for (_, object) in self.objects.iter_mut() {
                 let isometry = self
                     .physics
                     .rigid_bodies
@@ -319,16 +324,25 @@ impl Engine {
                     .unwrap()
                     .position();
                 for visual in object.visuals.iter() {
-                    let m = (isometry * visual.similarity).to_homogeneous().transpose();
+                    let mc = (isometry * visual.similarity).to_homogeneous().transpose();
+                    let mp = (object.prev_isometry * visual.similarity)
+                        .to_homogeneous()
+                        .transpose();
                     self.render_objects.push(blade_render::Object {
                         transform: blade_graphics::Transform {
-                            x: m.column(0).into(),
-                            y: m.column(1).into(),
-                            z: m.column(2).into(),
+                            x: mc.column(0).into(),
+                            y: mc.column(1).into(),
+                            z: mc.column(2).into(),
+                        },
+                        prev_transform: blade_graphics::Transform {
+                            x: mp.column(0).into(),
+                            y: mp.column(1).into(),
+                            z: mp.column(2).into(),
                         },
                         model: visual.model,
                     });
                 }
+                object.prev_isometry = *isometry;
             }
 
             // Rebuilding every frame
@@ -364,7 +378,7 @@ impl Engine {
             }
         }
 
-        let debug_lines = self.physics.collect_debug_lines();
+        let debug_lines = self.physics.render_debug();
 
         let frame = self.gpu_context.acquire_frame();
         command_encoder.init_texture(frame.texture());
@@ -404,11 +418,16 @@ impl Engine {
         egui::CollapsingHeader::new("Visualize")
             .default_open(true)
             .show(ui, |ui| {
-                ui.checkbox(
-                    &mut self.physics.visualization.bounding_boxes,
-                    "Bounding boxes",
-                );
-                ui.checkbox(&mut self.physics.visualization.contacts, "Contacts");
+                let all_bits = rapier3d::pipeline::DebugRenderMode::all().bits();
+                for bit_pos in 0..=all_bits.ilog2() {
+                    let flag = match rapier3d::pipeline::DebugRenderMode::from_bits(1 << bit_pos) {
+                        Some(flag) => flag,
+                        None => continue,
+                    };
+                    let mut enabled = self.physics.debug_pipeline.mode.contains(flag);
+                    ui.checkbox(&mut enabled, format!("{flag:?}"));
+                    self.physics.debug_pipeline.mode.set(flag, enabled);
+                }
             });
         egui::CollapsingHeader::new("Objects")
             .default_open(true)
@@ -434,7 +453,7 @@ impl Engine {
         config: &super::ObjectConfig,
         isometry: nalgebra::Isometry3<f32>,
         body_type: BodyType,
-    ) -> usize {
+    ) -> ObjectHandle {
         let mut visuals = Vec::new();
         for visual in config.visuals.iter() {
             let (model, task) = self.asset_hub.models.load(
@@ -495,18 +514,33 @@ impl Engine {
         self.objects.insert(Object {
             name: config.name.clone(),
             rigid_body: rb_handle,
+            prev_isometry: nalgebra::Isometry3::default(),
             _colliders: colliders,
             visuals,
         })
     }
 
-    pub fn get_object_isometry(&self, handle: usize) -> &nalgebra::Isometry3<f32> {
+    pub fn add_joint(
+        &mut self,
+        a: ObjectHandle,
+        b: ObjectHandle,
+        data: impl Into<rapier3d::dynamics::GenericJoint>,
+    ) -> JointHandle {
+        self.physics.impulse_joints.insert(
+            self.objects[a].rigid_body,
+            self.objects[b].rigid_body,
+            data,
+            true,
+        )
+    }
+
+    pub fn get_object_isometry(&self, handle: ObjectHandle) -> &nalgebra::Isometry3<f32> {
         let object = &self.objects[handle];
         let body = &self.physics.rigid_bodies[object.rigid_body];
         body.position()
     }
 
-    pub fn apply_impulse(&mut self, handle: usize, impulse: nalgebra::Vector3<f32>) {
+    pub fn apply_impulse(&mut self, handle: ObjectHandle, impulse: nalgebra::Vector3<f32>) {
         let object = &self.objects[handle];
         let body = &mut self.physics.rigid_bodies[object.rigid_body];
         body.apply_impulse(impulse, false)

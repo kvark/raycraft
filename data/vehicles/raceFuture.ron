@@ -1,0 +1,32 @@
+(
+    body: (
+        visual: (
+            model: "raceFuture-body.glb",
+            pos: (0, -0.3, -0.1),
+            rot: (0, 180, 0),
+        ),
+        collider: (
+            mass: 10.0,
+            pos: (0, 0, 0),
+            shape: Cuboid(
+                half: (0.7, 0.3, 1.3),
+            ),
+        ),
+    ),
+    wheel: (
+        visual: (
+            model: "car-kit/wheelRacing.glb",
+        ),
+        collider: (
+            mass: 1.0,
+            pos: (0, 0, 0),
+            rot: (0, 0, 90),
+            shape: Cylinder(
+                half_height: 0.1,
+                radius: 0.25,
+            ),
+        ),
+    ),
+    track_size: 1.0,
+    axles: [0.5, -1.0],
+)

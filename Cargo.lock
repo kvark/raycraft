@@ -446,6 +446,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "colorsys"
+version = "0.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54261aba646433cb567ec89844be4c4825ca92a4f8afba52fc4dd88436e31bbd"
+
+[[package]]
 name = "combine"
 version = "4.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -840,9 +846,9 @@ dependencies = [
 
 [[package]]
 name = "glow"
-version = "0.12.3"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca0fe580e4b60a8ab24a868bc08e2f03cbcb20d3d676601fa909386713333728"
+checksum = "886c2a30b160c4c6fec8f987430c26b526b7988ca71f664e6a699ddf6f9601e4"
 dependencies = [
  "js-sys",
  "slotmap",
@@ -1739,6 +1745,7 @@ dependencies = [
  "blade-macros",
  "blade-render",
  "choir",
+ "colorsys",
  "egui",
  "egui-winit",
  "env_logger",
