@@ -5,7 +5,9 @@ pub use rapier3d::dynamics::RigidBodyType as BodyType;
 
 const MAX_DEPTH: f32 = 1e9;
 
-pub type ObjectHandle = usize;
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+pub struct ObjectHandle(usize);
+//TODO: hide Rapier3D as a private dependency
 pub use rapier3d::dynamics::ImpulseJointHandle as JointHandle;
 
 fn make_quaternion(degrees: mint::Vector3<f32>) -> nalgebra::geometry::UnitQuaternion<f32> {
@@ -435,13 +437,13 @@ impl Engine {
                 for (handle, object) in self.objects.iter() {
                     ui.selectable_value(
                         &mut self.selected_object_index,
-                        Some(handle),
+                        Some(ObjectHandle(handle)),
                         &object.name,
                     );
                 }
             });
         if let Some(handle) = self.selected_object_index {
-            let object = &self.objects[handle];
+            let object = &self.objects[handle.0];
             let rigid_body = &self.physics.rigid_bodies[object.rigid_body];
             let t = rigid_body.translation();
             ui.label(format!("Position: {:.1}, {:.1}, {:.1}", t.x, t.y, t.z));
@@ -511,13 +513,14 @@ impl Engine {
             colliders.push(c_handle);
         }
 
-        self.objects.insert(Object {
+        let raw_handle = self.objects.insert(Object {
             name: config.name.clone(),
             rigid_body: rb_handle,
             prev_isometry: nalgebra::Isometry3::default(),
             _colliders: colliders,
             visuals,
-        })
+        });
+        ObjectHandle(raw_handle)
     }
 
     pub fn add_joint(
@@ -527,21 +530,21 @@ impl Engine {
         data: impl Into<rapier3d::dynamics::GenericJoint>,
     ) -> JointHandle {
         self.physics.impulse_joints.insert(
-            self.objects[a].rigid_body,
-            self.objects[b].rigid_body,
+            self.objects[a.0].rigid_body,
+            self.objects[b.0].rigid_body,
             data,
             true,
         )
     }
 
     pub fn get_object_isometry(&self, handle: ObjectHandle) -> &nalgebra::Isometry3<f32> {
-        let object = &self.objects[handle];
+        let object = &self.objects[handle.0];
         let body = &self.physics.rigid_bodies[object.rigid_body];
         body.position()
     }
 
     pub fn apply_impulse(&mut self, handle: ObjectHandle, impulse: nalgebra::Vector3<f32>) {
-        let object = &self.objects[handle];
+        let object = &self.objects[handle.0];
         let body = &mut self.physics.rigid_bodies[object.rigid_body];
         body.apply_impulse(impulse, false)
     }
