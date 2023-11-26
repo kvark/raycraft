@@ -66,11 +66,19 @@ struct VehiclePartConfig {
 }
 
 #[derive(serde::Deserialize)]
+struct AxleConfig {
+    z: f32,
+    x: f32,
+    /// Maximum rotation angle around Y axis.
+    #[serde(default)]
+    max_angle: f32,
+}
+
+#[derive(serde::Deserialize)]
 struct VehicleConfig {
     body: VehiclePartConfig,
     wheel: VehiclePartConfig,
-    track_size: f32,
-    axles: Vec<f32>,
+    axles: Vec<AxleConfig>,
 }
 
 #[derive(serde::Deserialize)]
@@ -106,12 +114,12 @@ struct GameConfig {
 
 struct Axle {
     //axis: usize,
-    wheel_left: usize,
-    wheel_right: usize,
+    wheel_left: engine::ObjectHandle,
+    wheel_right: engine::ObjectHandle,
 }
 
 struct Vehicle {
-    body_handle: usize,
+    body_handle: engine::ObjectHandle,
     axles: Vec<Axle>,
 }
 
@@ -119,12 +127,13 @@ struct Game {
     // engine stuff
     engine: engine::Engine,
     last_physics_update: time::Instant,
+    is_paused: bool,
     // windowing
     window: winit::window::Window,
     egui_state: egui_winit::State,
     egui_context: egui::Context,
     // game data
-    _ground_handle: usize,
+    _ground_handle: engine::ObjectHandle,
     vehicle: Vehicle,
     cam_config: CameraConfig,
 }
@@ -190,49 +199,18 @@ impl Game {
                 rot: [0.0; 3].into(),
             }],
         };
-        for axle_offset in veh_config.axles {
+        for ac in veh_config.axles {
+            let isometry_center =
+                nalgebra::Isometry3::translation(init_pos.x, init_pos.y, init_pos.z + ac.z);
             let isometry_left = nalgebra::Isometry3::from_parts(
-                nalgebra::Translation3::new(
-                    init_pos.x + 0.5 * veh_config.track_size,
-                    init_pos.y,
-                    init_pos.z + axle_offset,
-                ),
+                nalgebra::Translation3::new(init_pos.x + ac.x, init_pos.y, init_pos.z + ac.z),
                 nalgebra::UnitQuaternion::from_axis_angle(
                     &nalgebra::Vector3::y_axis(),
                     std::f32::consts::PI,
                 ),
             );
-            let isometry_right = nalgebra::Isometry3::translation(
-                init_pos.x - 0.5 * veh_config.track_size,
-                init_pos.y,
-                init_pos.z + axle_offset,
-            );
-            let axle_left =
-                engine.add_object(&axle_config, isometry_left, engine::BodyType::Dynamic);
-            let axle_right =
-                engine.add_object(&axle_config, isometry_right, engine::BodyType::Dynamic);
-            let _axle_l_joint = engine.add_joint(
-                vehicle.body_handle,
-                axle_left,
-                rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::y_axis())
-                    .contacts_enabled(false)
-                    .local_anchor1(nalgebra::Point3::new(
-                        0.5 * veh_config.track_size,
-                        0.0,
-                        axle_offset,
-                    )),
-            );
-            let _axle_r_joint = engine.add_joint(
-                vehicle.body_handle,
-                axle_right,
-                rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::y_axis())
-                    .contacts_enabled(false)
-                    .local_anchor1(nalgebra::Point3::new(
-                        -0.5 * veh_config.track_size,
-                        0.0,
-                        axle_offset,
-                    )),
-            );
+            let isometry_right =
+                nalgebra::Isometry3::translation(init_pos.x - ac.x, init_pos.y, init_pos.z + ac.z);
 
             let axle = Axle {
                 //axis: axle_handle,
@@ -247,24 +225,109 @@ impl Game {
                     engine::BodyType::Dynamic,
                 ),
             };
-            let _axle_l = engine.add_joint(
-                axle_left,
+
+
+            if ac.max_angle != 0.0 || true {
+                let steer_l_axle =
+                    engine.add_object(&axle_config, isometry_left, engine::BodyType::Dynamic);
+                let steer_r_axle =
+                    engine.add_object(&axle_config, isometry_right, engine::BodyType::Dynamic);
+
+                let steer_limits = [-ac.max_angle.to_radians(), ac.max_angle.to_radians()];
+                let _steer_l_joint = engine.add_joint(
+                    vehicle.body_handle,
+                    steer_l_axle,
+                    rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::y_axis())
+                        .contacts_enabled(false)
+                        .local_anchor1(nalgebra::Point3::new(ac.x, 0.0, ac.z)),
+                    //.limits(steer_limits),
+                );
+                let _steer_r_joint = engine.add_joint(
+                    vehicle.body_handle,
+                    steer_r_axle,
+                    rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::y_axis())
+                        .contacts_enabled(false)
+                        .local_anchor1(nalgebra::Point3::new(-ac.x, 0.0, ac.z)),
+                    //.limits(steer_limits),
+                );
+
+                let _wheel_l = engine.add_joint(
+                    steer_l_axle,
+                    axle.wheel_left,
+                    rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
+                        .contacts_enabled(false),
+                );
+                let _wheel_r = engine.add_joint(
+                    steer_r_axle,
+                    axle.wheel_right,
+                    rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
+                        .contacts_enabled(false),
+                );
+            } else {
+                let config = ObjectConfig {
+                    name: format!("{}/axle", config.vehicle),
+                    visuals: vec![],
+                    colliders: vec![ColliderConfig {
+                        mass: 1.0,
+                        shape: Shape::Cylinder {
+                            half_height: 1.0,
+                            radius: 0.1,
+                        },
+                        pos: [0.0, 0.0, 0.0].into(),
+                        rot: [0.0, 0.0, 90.0].into(),
+                    }],
+                };
+                let axle_center = engine.add_object(&config, isometry_center, engine::BodyType::Dynamic);
+                /*let axle_joint = engine.add_joint(vehicle.body_handle, axle_center,
+                    rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
+                        .local_anchor1([0.0, 0.0, ac.z].into())
+                        .contacts_enabled(false),
+                );*/
+
+                let _wheel_l = engine.add_joint(
+                    axle_center,
+                    axle.wheel_left,
+                    rapier3d::dynamics::GenericJointBuilder::new(rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES)
+                        .local_anchor1([ac.x, 0.0, 0.0].into())
+                        .local_axis1(-nalgebra::Vector3::x_axis())
+                        .local_axis2(nalgebra::Vector3::x_axis())
+                        .contacts_enabled(false),
+                );
+                let _wheel_r = engine.add_joint(
+                    axle_center,
+                    axle.wheel_right,
+                    rapier3d::dynamics::GenericJointBuilder::new(rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES)
+                        .local_anchor1([-ac.x, 0.0, 0.0].into())
+                        .local_axis1(nalgebra::Vector3::x_axis())
+                        .local_axis2(nalgebra::Vector3::x_axis())
+                        .contacts_enabled(false),
+                );
+            }
+
+            let _extra_l = engine.add_joint(
+                vehicle.body_handle,
                 axle.wheel_left,
-                rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
-                    .contacts_enabled(false),
+                rapier3d::dynamics::GenericJoint {
+                    contacts_enabled: false,
+                    ..Default::default()
+                },
             );
-            let _axle_r = engine.add_joint(
-                axle_right,
+            let _extra_r = engine.add_joint(
+                vehicle.body_handle,
                 axle.wheel_right,
-                rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
-                    .contacts_enabled(false),
+                rapier3d::dynamics::GenericJoint {
+                    contacts_enabled: false,
+                    ..Default::default()
+                },
             );
+
             vehicle.axles.push(axle);
         }
 
         Self {
             engine,
             last_physics_update: time::Instant::now(),
+            is_paused: false,
             window,
             egui_state: egui_winit::State::new(event_loop),
             egui_context: egui::Context::default(),
@@ -344,6 +407,7 @@ impl Game {
             egui::SidePanel::right("engine")
                 .frame(frame)
                 .show(egui_ctx, |ui| {
+                    ui.toggle_value(&mut self.is_paused, "Pause");
                     egui::CollapsingHeader::new("Camera").show(ui, |ui| {
                         ui.add(
                             egui::DragValue::new(&mut self.cam_config.distance)
@@ -380,7 +444,9 @@ impl Game {
         );
         let engine_dt = self.last_physics_update.elapsed().as_secs_f32();
         self.last_physics_update = time::Instant::now();
-        self.engine.update(engine_dt);
+        if !self.is_paused {
+            self.engine.update(engine_dt);
+        }
 
         let camera = {
             let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
