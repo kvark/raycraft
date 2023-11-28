@@ -3,7 +3,7 @@
 
 mod engine;
 
-use std::{fs, time};
+use std::{fs, mem, time};
 
 fn default_vec() -> mint::Vector3<f32> {
     [0.0; 3].into()
@@ -127,7 +127,7 @@ struct Game {
     // engine stuff
     engine: engine::Engine,
     last_physics_update: time::Instant,
-    is_paused: bool,
+    is_paused: Option<egui_gizmo::GizmoMode>,
     // windowing
     window: winit::window::Window,
     egui_state: egui_winit::State,
@@ -226,14 +226,13 @@ impl Game {
                 ),
             };
 
-
             if ac.max_angle != 0.0 || true {
                 let steer_l_axle =
                     engine.add_object(&axle_config, isometry_left, engine::BodyType::Dynamic);
                 let steer_r_axle =
                     engine.add_object(&axle_config, isometry_right, engine::BodyType::Dynamic);
 
-                let steer_limits = [-ac.max_angle.to_radians(), ac.max_angle.to_radians()];
+                //let steer_limits = [-ac.max_angle.to_radians(), ac.max_angle.to_radians()];
                 let _steer_l_joint = engine.add_joint(
                     vehicle.body_handle,
                     steer_l_axle,
@@ -277,7 +276,8 @@ impl Game {
                         rot: [0.0, 0.0, 90.0].into(),
                     }],
                 };
-                let axle_center = engine.add_object(&config, isometry_center, engine::BodyType::Dynamic);
+                let axle_center =
+                    engine.add_object(&config, isometry_center, engine::BodyType::Dynamic);
                 /*let axle_joint = engine.add_joint(vehicle.body_handle, axle_center,
                     rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
                         .local_anchor1([0.0, 0.0, ac.z].into())
@@ -287,20 +287,24 @@ impl Game {
                 let _wheel_l = engine.add_joint(
                     axle_center,
                     axle.wheel_left,
-                    rapier3d::dynamics::GenericJointBuilder::new(rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES)
-                        .local_anchor1([ac.x, 0.0, 0.0].into())
-                        .local_axis1(-nalgebra::Vector3::x_axis())
-                        .local_axis2(nalgebra::Vector3::x_axis())
-                        .contacts_enabled(false),
+                    rapier3d::dynamics::GenericJointBuilder::new(
+                        rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES,
+                    )
+                    .local_anchor1([ac.x, 0.0, 0.0].into())
+                    .local_axis1(-nalgebra::Vector3::x_axis())
+                    .local_axis2(nalgebra::Vector3::x_axis())
+                    .contacts_enabled(false),
                 );
                 let _wheel_r = engine.add_joint(
                     axle_center,
                     axle.wheel_right,
-                    rapier3d::dynamics::GenericJointBuilder::new(rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES)
-                        .local_anchor1([-ac.x, 0.0, 0.0].into())
-                        .local_axis1(nalgebra::Vector3::x_axis())
-                        .local_axis2(nalgebra::Vector3::x_axis())
-                        .contacts_enabled(false),
+                    rapier3d::dynamics::GenericJointBuilder::new(
+                        rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES,
+                    )
+                    .local_anchor1([-ac.x, 0.0, 0.0].into())
+                    .local_axis1(nalgebra::Vector3::x_axis())
+                    .local_axis2(nalgebra::Vector3::x_axis())
+                    .contacts_enabled(false),
                 );
             }
 
@@ -327,7 +331,7 @@ impl Game {
         Self {
             engine,
             last_physics_update: time::Instant::now(),
-            is_paused: false,
+            is_paused: None,
             window,
             egui_state: egui_winit::State::new(event_loop),
             egui_context: egui::Context::default(),
@@ -391,9 +395,112 @@ impl Game {
         false
     }
 
+    fn add_camera_manipulation(&mut self, ui: &mut egui::Ui) {
+        let mode = match self.is_paused {
+            Some(mode) => mode,
+            None => return,
+        };
+
+        let cc = &self.cam_config;
+        let eye_dir = nalgebra::Vector3::new(
+            -cc.azimuth.sin() * cc.altitude.cos(),
+            cc.altitude.sin(),
+            -cc.azimuth.cos() * cc.altitude.cos(),
+        );
+
+        let rotation = {
+            let z = eye_dir;
+            //let x = z.cross(&nalgebra::Vector3::y_axis()).normalize();
+            let x = nalgebra::Vector3::new(cc.azimuth.cos(), 0.0, -cc.azimuth.sin());
+            //let y = z.cross(&x);
+            let y = nalgebra::Vector3::new(
+                cc.altitude.sin() * -cc.azimuth.sin(),
+                -cc.altitude.cos(),
+                cc.altitude.sin() * -cc.azimuth.cos(),
+            );
+            nalgebra::geometry::UnitQuaternion::from_rotation_matrix(
+                &nalgebra::geometry::Rotation3::from_basis_unchecked(&[x, y, z]).transpose(),
+            )
+        };
+        let view = {
+            let t = rotation * (nalgebra::Vector3::from(cc.target) - eye_dir.scale(cc.distance));
+            nalgebra::geometry::Isometry3::from_parts(t.into(), rotation)
+        };
+
+        let aspect = self.engine.screen_aspect();
+        let depth_range = 1.0f32..10000.0; //TODO?
+        let projection_matrix =
+            nalgebra::Matrix4::new_perspective(aspect, cc.fov, depth_range.start, depth_range.end);
+
+        let gizmo = egui_gizmo::Gizmo::new("Object")
+            .model_matrix(view.to_homogeneous())
+            .projection_matrix(projection_matrix)
+            .mode(mode)
+            .orientation(egui_gizmo::GizmoOrientation::Global)
+            .snapping(true);
+
+        if let Some(result) = gizmo.interact(ui) {
+            let q = nalgebra::Unit::new_normalize(nalgebra::Quaternion::from(
+                result.rotation.to_array(),
+            ));
+            let m = q.inverse().to_rotation_matrix();
+            self.cam_config.azimuth = -m[(2, 0)].atan2(m[(0, 0)]);
+            self.cam_config.altitude = (-m[(1, 1)]).acos();
+            let t_local = q
+                .inverse()
+                .transform_vector(&nalgebra::Vector3::from(result.translation.to_array()));
+            self.cam_config.target = (t_local + eye_dir.scale(self.cam_config.distance)).into();
+        }
+    }
+
+    fn populate_hud(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Camera")
+            .default_open(true)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::DragValue::new(&mut self.cam_config.distance)
+                        .prefix("Distance")
+                        .clamp_range(1.0..=100.0),
+                );
+                ui.horizontal(|ui| {
+                    ui.selectable_value(
+                        &mut self.is_paused,
+                        Some(egui_gizmo::GizmoMode::Translate),
+                        "Target",
+                    );
+                    ui.add(egui::DragValue::new(&mut self.cam_config.target.y));
+                    ui.add(egui::DragValue::new(&mut self.cam_config.target.z));
+                });
+                ui.horizontal(|ui| {
+                    ui.selectable_value(
+                        &mut self.is_paused,
+                        Some(egui_gizmo::GizmoMode::Rotate),
+                        "Angle",
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.cam_config.azimuth).clamp_range(
+                            -std::f32::consts::FRAC_PI_2..=std::f32::consts::FRAC_PI_2,
+                        ),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.cam_config.altitude)
+                            .clamp_range(0.01..=std::f32::consts::FRAC_PI_2),
+                    );
+                });
+                ui.add(egui::Slider::new(&mut self.cam_config.fov, 0.5f32..=2.0f32).text("FOV"));
+                if self.is_paused.is_some() && ui.button("Unpause").clicked() {
+                    self.is_paused = None;
+                }
+            });
+
+        self.add_camera_manipulation(ui);
+        self.engine.populate_hud(ui);
+    }
+
     fn on_draw(&mut self) -> time::Duration {
         let raw_input = self.egui_state.take_egui_input(&self.window);
-        let egui_output = self.egui_context.run(raw_input, |egui_ctx| {
+        let egui_context = mem::take(&mut self.egui_context);
+        let egui_output = egui_context.run(raw_input, |egui_ctx| {
             let frame = {
                 let mut frame = egui::Frame::side_top_panel(&egui_ctx.style());
                 let mut fill = frame.fill.to_array();
@@ -406,36 +513,9 @@ impl Game {
             };
             egui::SidePanel::right("engine")
                 .frame(frame)
-                .show(egui_ctx, |ui| {
-                    ui.toggle_value(&mut self.is_paused, "Pause");
-                    egui::CollapsingHeader::new("Camera").show(ui, |ui| {
-                        ui.add(
-                            egui::DragValue::new(&mut self.cam_config.distance)
-                                .prefix("Distance")
-                                .clamp_range(1.0..=100.0),
-                        );
-                        ui.add(egui::Slider::new(
-                            &mut self.cam_config.azimuth,
-                            -std::f32::consts::FRAC_PI_2..=std::f32::consts::FRAC_PI_2,
-                        ));
-                        ui.add(egui::Slider::new(
-                            &mut self.cam_config.altitude,
-                            0.01..=std::f32::consts::FRAC_PI_2,
-                        ));
-                        ui.horizontal(|ui| {
-                            ui.label("Target:");
-                            ui.add(egui::DragValue::new(&mut self.cam_config.target.y));
-                            ui.add(egui::DragValue::new(&mut self.cam_config.target.z));
-                        });
-                        ui.add(
-                            egui::Slider::new(&mut self.cam_config.fov, 0.5f32..=2.0f32)
-                                .text("FOV"),
-                        );
-                    });
-
-                    self.engine.populate_hud(ui);
-                });
+                .show(egui_ctx, |ui| self.populate_hud(ui));
         });
+        self.egui_context = egui_context;
 
         self.egui_state.handle_platform_output(
             &self.window,
@@ -444,7 +524,7 @@ impl Game {
         );
         let engine_dt = self.last_physics_update.elapsed().as_secs_f32();
         self.last_physics_update = time::Instant::now();
-        if !self.is_paused {
+        if self.is_paused.is_none() {
             self.engine.update(engine_dt);
         }
 
@@ -466,8 +546,12 @@ impl Game {
             //TODO: `nalgebra::Point3::from(mint::Vector3)` doesn't exist?
             let cc = &self.cam_config;
             let source = nalgebra::Vector3::from(cc.target)
-                + nalgebra::Vector3::new(-cc.azimuth.sin(), cc.altitude.sin(), -cc.azimuth.cos())
-                    .scale(cc.distance);
+                + nalgebra::Vector3::new(
+                    -cc.azimuth.sin() * cc.altitude.cos(),
+                    cc.altitude.sin(),
+                    -cc.azimuth.cos() * cc.altitude.cos(),
+                )
+                .scale(cc.distance);
             let local = nalgebra::geometry::Isometry3::look_at_rh(
                 &source.into(),
                 &nalgebra::Vector3::from(cc.target).into(),

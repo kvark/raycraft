@@ -450,6 +450,11 @@ impl Engine {
         }
     }
 
+    pub fn screen_aspect(&self) -> f32 {
+        let size = self.renderer.get_screen_size();
+        size.width as f32 / size.height.max(1) as f32
+    }
+
     pub fn add_object(
         &mut self,
         config: &super::ObjectConfig,
