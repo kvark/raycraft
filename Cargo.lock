@@ -639,6 +639,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-gizmo"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f732ad247afe275d6cf901e0f134025ad735007c8f4d82e667a6871f1b4a5441"
+dependencies = [
+ "egui",
+ "glam 0.24.2",
+]
+
+[[package]]
 name = "egui-winit"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1747,6 +1757,7 @@ dependencies = [
  "choir",
  "colorsys",
  "egui",
+ "egui-gizmo",
  "egui-winit",
  "env_logger",
  "log",

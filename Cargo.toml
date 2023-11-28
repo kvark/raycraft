@@ -12,6 +12,7 @@ blade-egui = { path = "../blade/blade-egui" }
 choir = "0.7"
 colorsys = "0.6"
 egui = "0.23"
+egui-gizmo = "0.12"
 egui-winit = "0.23"
 env_logger = "0.10"
 nalgebra = { version = "0.32", features = ["mint"] }
