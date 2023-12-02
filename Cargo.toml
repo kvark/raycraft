@@ -25,3 +25,6 @@ ron = "0.8"
 serde = { version = "1", features = ["serde_derive"] }
 slab = "0.4"
 winit = "0.28"
+
+[patch.crates-io]
+rapier3d = { path = "../rapier/crates/rapier3d" }

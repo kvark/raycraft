@@ -542,6 +542,10 @@ impl Engine {
         )
     }
 
+    pub fn get_joint_mut(&mut self, handle: JointHandle) -> &mut rapier3d::dynamics::ImpulseJoint {
+        self.physics.impulse_joints.get_mut(handle).unwrap()
+    }
+
     pub fn get_object_isometry(&self, handle: ObjectHandle) -> &nalgebra::Isometry3<f32> {
         let object = &self.objects[handle.0];
         let body = &self.physics.rigid_bodies[object.rigid_body];
