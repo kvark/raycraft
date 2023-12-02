@@ -3,7 +3,7 @@
 
 mod engine;
 
-use std::{fs, mem, time};
+use std::{f32::consts, fs, mem, time};
 
 fn default_vec() -> mint::Vector3<f32> {
     [0.0; 3].into()
@@ -65,13 +65,19 @@ struct VehiclePartConfig {
     collider: ColliderConfig,
 }
 
+#[derive(Default, serde::Deserialize)]
+struct SteerConfig {
+    max_angle: f32,
+    stiffness: f32,
+    damping: f32,
+}
+
 #[derive(serde::Deserialize)]
 struct AxleConfig {
     z: f32,
     x: f32,
-    /// Maximum rotation angle around Y axis.
     #[serde(default)]
-    max_angle: f32,
+    steer: SteerConfig,
 }
 
 #[derive(serde::Deserialize)]
@@ -112,15 +118,20 @@ struct GameConfig {
     vehicle: String,
 }
 
-struct Axle {
-    //axis: usize,
-    wheel_left: engine::ObjectHandle,
-    wheel_right: engine::ObjectHandle,
+struct Wheel {
+    _object: engine::ObjectHandle,
+    joint: engine::JointHandle,
+}
+
+struct WheelAxle {
+    left: Wheel,
+    right: Wheel,
+    steer: Option<SteerConfig>,
 }
 
 struct Vehicle {
     body_handle: engine::ObjectHandle,
-    axles: Vec<Axle>,
+    wheel_axles: Vec<WheelAxle>,
 }
 
 struct Game {
@@ -179,153 +190,86 @@ impl Game {
                 nalgebra::Isometry3::translation(init_pos.x, init_pos.y, init_pos.z),
                 engine::BodyType::Dynamic,
             ),
-            axles: Vec::new(),
+            wheel_axles: Vec::new(),
         };
         let wheel_config = ObjectConfig {
             name: format!("{}/wheel", config.vehicle),
             visuals: vec![veh_config.wheel.visual],
             colliders: vec![veh_config.wheel.collider],
         };
-        let axle_config = ObjectConfig {
-            name: format!("{}/axle", config.vehicle),
-            visuals: vec![],
-            colliders: vec![ColliderConfig {
-                mass: 1.0,
-                shape: Shape::Cylinder {
-                    half_height: 0.3,
-                    radius: 0.1,
-                },
-                pos: [0.0, 0.0, 0.0].into(),
-                rot: [0.0; 3].into(),
-            }],
-        };
         for ac in veh_config.axles {
-            let isometry_center =
-                nalgebra::Isometry3::translation(init_pos.x, init_pos.y, init_pos.z + ac.z);
-            let isometry_left = nalgebra::Isometry3::from_parts(
-                nalgebra::Translation3::new(init_pos.x + ac.x, init_pos.y, init_pos.z + ac.z),
-                nalgebra::UnitQuaternion::from_axis_angle(
-                    &nalgebra::Vector3::y_axis(),
-                    std::f32::consts::PI,
+            let offset_left = nalgebra::Vector3::new(ac.x, 0.0, ac.z);
+            let offset_right = nalgebra::Vector3::new(-ac.x, 0.0, ac.z);
+
+            let wheel_left = engine.add_object(
+                &wheel_config,
+                nalgebra::Isometry3::new(
+                    init_pos + offset_left,
+                    nalgebra::Vector3::y_axis().scale(consts::PI),
                 ),
+                engine::BodyType::Dynamic,
             );
-            let isometry_right =
-                nalgebra::Isometry3::translation(init_pos.x - ac.x, init_pos.y, init_pos.z + ac.z);
+            let wheel_right = engine.add_object(
+                &wheel_config,
+                nalgebra::Isometry3::new(init_pos + offset_right, nalgebra::Vector3::zeros()),
+                engine::BodyType::Dynamic,
+            );
 
-            let axle = Axle {
-                //axis: axle_handle,
-                wheel_left: engine.add_object(
-                    &wheel_config,
-                    isometry_left,
-                    engine::BodyType::Dynamic,
-                ),
-                wheel_right: engine.add_object(
-                    &wheel_config,
-                    isometry_right,
-                    engine::BodyType::Dynamic,
-                ),
-            };
-
-            if ac.max_angle != 0.0 || true {
-                let steer_l_axle =
-                    engine.add_object(&axle_config, isometry_left, engine::BodyType::Dynamic);
-                let steer_r_axle =
-                    engine.add_object(&axle_config, isometry_right, engine::BodyType::Dynamic);
-
-                //let steer_limits = [-ac.max_angle.to_radians(), ac.max_angle.to_radians()];
-                let _steer_l_joint = engine.add_joint(
-                    vehicle.body_handle,
-                    steer_l_axle,
-                    rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::y_axis())
-                        .contacts_enabled(false)
-                        .local_anchor1(nalgebra::Point3::new(ac.x, 0.0, ac.z)),
-                    //.limits(steer_limits),
-                );
-                let _steer_r_joint = engine.add_joint(
-                    vehicle.body_handle,
-                    steer_r_axle,
-                    rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::y_axis())
-                        .contacts_enabled(false)
-                        .local_anchor1(nalgebra::Point3::new(-ac.x, 0.0, ac.z)),
-                    //.limits(steer_limits),
-                );
-
-                let _wheel_l = engine.add_joint(
-                    steer_l_axle,
-                    axle.wheel_left,
-                    rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
-                        .contacts_enabled(false),
-                );
-                let _wheel_r = engine.add_joint(
-                    steer_r_axle,
-                    axle.wheel_right,
-                    rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
-                        .contacts_enabled(false),
-                );
+            let has_steer = ac.steer.max_angle > 0.0;
+            let max_angle = ac.steer.max_angle.to_radians();
+            let locked_axes = if has_steer {
+                rapier3d::dynamics::JointAxesMask::LIN_AXES
+                    | rapier3d::dynamics::JointAxesMask::ANG_Z
             } else {
-                let config = ObjectConfig {
-                    name: format!("{}/axle", config.vehicle),
-                    visuals: vec![],
-                    colliders: vec![ColliderConfig {
-                        mass: 1.0,
-                        shape: Shape::Cylinder {
-                            half_height: 1.0,
-                            radius: 0.1,
-                        },
-                        pos: [0.0, 0.0, 0.0].into(),
-                        rot: [0.0, 0.0, 90.0].into(),
-                    }],
-                };
-                let axle_center =
-                    engine.add_object(&config, isometry_center, engine::BodyType::Dynamic);
-                /*let axle_joint = engine.add_joint(vehicle.body_handle, axle_center,
-                    rapier3d::dynamics::RevoluteJointBuilder::new(nalgebra::Vector3::x_axis())
-                        .local_anchor1([0.0, 0.0, ac.z].into())
-                        .contacts_enabled(false),
-                );*/
-
-                let _wheel_l = engine.add_joint(
-                    axle_center,
-                    axle.wheel_left,
-                    rapier3d::dynamics::GenericJointBuilder::new(
-                        rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES,
-                    )
-                    .local_anchor1([ac.x, 0.0, 0.0].into())
-                    .local_axis1(-nalgebra::Vector3::x_axis())
-                    .local_axis2(nalgebra::Vector3::x_axis())
-                    .contacts_enabled(false),
-                );
-                let _wheel_r = engine.add_joint(
-                    axle_center,
-                    axle.wheel_right,
-                    rapier3d::dynamics::GenericJointBuilder::new(
-                        rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES,
-                    )
-                    .local_anchor1([-ac.x, 0.0, 0.0].into())
-                    .local_axis1(nalgebra::Vector3::x_axis())
-                    .local_axis2(nalgebra::Vector3::x_axis())
-                    .contacts_enabled(false),
-                );
-            }
-
-            let _extra_l = engine.add_joint(
+                rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES
+            };
+            let joint_left = engine.add_joint(
                 vehicle.body_handle,
-                axle.wheel_left,
-                rapier3d::dynamics::GenericJoint {
-                    contacts_enabled: false,
-                    ..Default::default()
-                },
+                wheel_left,
+                rapier3d::dynamics::GenericJointBuilder::new(locked_axes)
+                    .contacts_enabled(false)
+                    .local_anchor1(offset_left.into())
+                    .local_frame2(nalgebra::Isometry3::rotation(
+                        nalgebra::Vector3::y_axis().scale(consts::PI),
+                    ))
+                    .limits(rapier3d::dynamics::JointAxis::Y, [-max_angle, max_angle])
+                    .motor_position(rapier3d::dynamics::JointAxis::X, 0.0, 1.0, 1.0)
+                    .motor_position(
+                        rapier3d::dynamics::JointAxis::Y,
+                        0.0,
+                        ac.steer.stiffness,
+                        ac.steer.damping,
+                    )
+                    .build(),
             );
-            let _extra_r = engine.add_joint(
+            let joint_right = engine.add_joint(
                 vehicle.body_handle,
-                axle.wheel_right,
-                rapier3d::dynamics::GenericJoint {
-                    contacts_enabled: false,
-                    ..Default::default()
-                },
+                wheel_right,
+                rapier3d::dynamics::GenericJointBuilder::new(locked_axes)
+                    .contacts_enabled(false)
+                    .local_anchor1(offset_right.into())
+                    .limits(rapier3d::dynamics::JointAxis::Y, [-max_angle, max_angle])
+                    .motor_position(rapier3d::dynamics::JointAxis::X, 0.0, 1.0, 1.0)
+                    .motor_position(
+                        rapier3d::dynamics::JointAxis::Y,
+                        0.0,
+                        ac.steer.stiffness,
+                        ac.steer.damping,
+                    )
+                    .build(),
             );
 
-            vehicle.axles.push(axle);
+            vehicle.wheel_axles.push(WheelAxle {
+                left: Wheel {
+                    _object: wheel_left,
+                    joint: joint_left,
+                },
+                right: Wheel {
+                    _object: wheel_right,
+                    joint: joint_right,
+                },
+                steer: if has_steer { Some(ac.steer) } else { None },
+            });
         }
 
         Self {
@@ -343,6 +287,35 @@ impl Game {
 
     fn destroy(&mut self) {
         self.engine.destroy();
+    }
+
+    fn set_velocity(&mut self, velocity: f32) {
+        for wax in self.vehicle.wheel_axles.iter() {
+            for &joint_handle in &[wax.left.joint, wax.right.joint] {
+                let joint = self.engine.get_joint_mut(joint_handle);
+                joint
+                    .data
+                    .set_motor_velocity(rapier3d::dynamics::JointAxis::X, velocity, 100.0);
+            }
+        }
+    }
+
+    fn set_steering(&mut self, angle_rad: f32) {
+        for wax in self.vehicle.wheel_axles.iter() {
+            let steer = match wax.steer {
+                Some(ref steer) => steer,
+                None => continue,
+            };
+            for &joint_handle in &[wax.left.joint, wax.right.joint] {
+                let joint = self.engine.get_joint_mut(joint_handle);
+                joint.data.set_motor_position(
+                    rapier3d::dynamics::JointAxis::Y,
+                    angle_rad,
+                    steer.stiffness,
+                    steer.damping,
+                );
+            }
+        }
     }
 
     fn on_event(&mut self, event: &winit::event::WindowEvent) -> bool {
@@ -368,22 +341,37 @@ impl Game {
                     return true;
                 }
                 winit::event::VirtualKeyCode::Up => {
-                    let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
-                    let dir = veh_isometry
-                        .rotation
-                        .transform_vector(&[0.0, 0.0, 10.0].into());
-                    self.engine.apply_impulse(self.vehicle.body_handle, dir);
+                    self.set_velocity(100.0);
                 }
                 winit::event::VirtualKeyCode::Down => {
-                    let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
-                    let dir = veh_isometry
-                        .rotation
-                        .transform_vector(&[0.0, 0.0, -10.0].into());
-                    self.engine.apply_impulse(self.vehicle.body_handle, dir);
+                    self.set_velocity(-20.0);
+                }
+                winit::event::VirtualKeyCode::Left => {
+                    self.set_steering(1.0);
+                }
+                winit::event::VirtualKeyCode::Right => {
+                    self.set_steering(-1.0);
                 }
                 winit::event::VirtualKeyCode::Space => {
                     self.engine
                         .apply_impulse(self.vehicle.body_handle, [0.0, 10.0, 0.0].into());
+                }
+                _ => {}
+            },
+            winit::event::WindowEvent::KeyboardInput {
+                input:
+                    winit::event::KeyboardInput {
+                        virtual_keycode: Some(key_code),
+                        state: winit::event::ElementState::Released,
+                        ..
+                    },
+                ..
+            } => match key_code {
+                winit::event::VirtualKeyCode::Up | winit::event::VirtualKeyCode::Down => {
+                    self.set_velocity(0.0);
+                }
+                winit::event::VirtualKeyCode::Left | winit::event::VirtualKeyCode::Right => {
+                    self.set_steering(0.0);
                 }
                 _ => {}
             },
@@ -472,19 +460,21 @@ impl Game {
                     ui.add(egui::DragValue::new(&mut self.cam_config.target.z));
                 });
                 ui.horizontal(|ui| {
+                    let eps = 0.01;
                     ui.selectable_value(
                         &mut self.is_paused,
                         Some(egui_gizmo::GizmoMode::Rotate),
                         "Angle",
                     );
                     ui.add(
-                        egui::DragValue::new(&mut self.cam_config.azimuth).clamp_range(
-                            -std::f32::consts::FRAC_PI_2..=std::f32::consts::FRAC_PI_2,
-                        ),
+                        egui::DragValue::new(&mut self.cam_config.azimuth)
+                            .clamp_range(-consts::FRAC_PI_2..=consts::FRAC_PI_2)
+                            .speed(0.1),
                     );
                     ui.add(
                         egui::DragValue::new(&mut self.cam_config.altitude)
-                            .clamp_range(0.01..=std::f32::consts::FRAC_PI_2),
+                            .clamp_range(eps..=consts::FRAC_PI_2 - eps)
+                            .speed(0.1),
                     );
                 });
                 ui.add(egui::Slider::new(&mut self.cam_config.fov, 0.5f32..=2.0f32).text("FOV"));
