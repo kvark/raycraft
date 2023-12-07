@@ -43,6 +43,7 @@ struct CameraConfig {
     azimuth: f32,
     altitude: f32,
     distance: f32,
+    speed: f32,
     target: [f32; 3],
     fov: f32,
 }
@@ -76,6 +77,7 @@ struct Game {
     // engine stuff
     engine: blade::Engine,
     last_physics_update: time::Instant,
+    last_camera_base_quat: nalgebra::UnitQuaternion<f32>,
     is_paused: bool,
     // windowing
     window: winit::window::Window,
@@ -214,6 +216,7 @@ impl Game {
         Self {
             engine,
             last_physics_update: time::Instant::now(),
+            last_camera_base_quat: Default::default(),
             is_paused: false,
             window,
             egui_state: egui_winit::State::new(event_loop),
@@ -401,12 +404,17 @@ impl Game {
             let base_quat =
                 nalgebra::UnitQuaternion::new_normalize(nalgebra::Quaternion::from_parts(
                     veh_isometry.rotation.quaternion().w,
-                    nalgebra::Vector3::y_axis().scale(projection.abs()),
+                    nalgebra::Vector3::y_axis().scale(projection),
                 ));
-            let base =
-                nalgebra::geometry::Isometry3::from_parts(veh_isometry.translation, base_quat);
-            //TODO: `nalgebra::Point3::from(mint::Vector3)` doesn't exist?
+
             let cc = &self.cam_config;
+            let smooth_t = (-engine_dt * cc.speed).exp();
+            let smooth_quat = nalgebra::UnitQuaternion::new_normalize(base_quat.lerp(&self.last_camera_base_quat, smooth_t));
+            let base =
+                nalgebra::geometry::Isometry3::from_parts(veh_isometry.translation, smooth_quat);
+            self.last_camera_base_quat = smooth_quat;
+
+            //TODO: `nalgebra::Point3::from(mint::Vector3)` doesn't exist?
             let source = nalgebra::Vector3::from(cc.target)
                 + nalgebra::Vector3::new(
                     -cc.azimuth.sin() * cc.altitude.cos(),
