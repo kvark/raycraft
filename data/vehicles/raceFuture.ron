@@ -27,6 +27,7 @@
             ),
         ),
     ),
+    drive_factor: 10.0,
     axles: [
         (
             x: 0.5,

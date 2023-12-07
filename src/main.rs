@@ -1,68 +1,9 @@
-#![allow(irrefutable_let_patterns)]
-#![cfg(not(target_arch = "wasm32"))]
-
-mod engine;
-
 use std::{f32::consts, fs, mem, time};
-
-fn default_vec() -> mint::Vector3<f32> {
-    [0.0; 3].into()
-}
-fn default_scale() -> f32 {
-    1.0
-}
-
-#[derive(serde::Deserialize)]
-struct VisualConfig {
-    model: String,
-    #[serde(default = "default_vec")]
-    pos: mint::Vector3<f32>,
-    #[serde(default = "default_vec")]
-    rot: mint::Vector3<f32>,
-    #[serde(default = "default_scale")]
-    scale: f32,
-}
-impl Default for VisualConfig {
-    fn default() -> Self {
-        Self {
-            model: String::new(),
-            pos: default_vec(),
-            rot: default_vec(),
-            scale: default_scale(),
-        }
-    }
-}
-
-#[derive(serde::Deserialize)]
-enum Shape {
-    Ball { radius: f32 },
-    Cylinder { half_height: f32, radius: f32 },
-    Cuboid { half: mint::Vector3<f32> },
-    ConvexHull { points: Vec<mint::Vector3<f32>> },
-}
-
-#[derive(serde::Deserialize)]
-struct ColliderConfig {
-    mass: f32,
-    shape: Shape,
-    #[serde(default = "default_vec")]
-    pos: mint::Vector3<f32>,
-    #[serde(default = "default_vec")]
-    rot: mint::Vector3<f32>,
-}
-
-#[derive(serde::Deserialize)]
-pub struct ObjectConfig {
-    #[serde(default)]
-    name: String,
-    visuals: Vec<VisualConfig>,
-    colliders: Vec<ColliderConfig>,
-}
 
 #[derive(serde::Deserialize)]
 struct VehiclePartConfig {
-    visual: VisualConfig,
-    collider: ColliderConfig,
+    visual: blade::config::Visual,
+    collider: blade::config::Collider,
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -84,12 +25,8 @@ struct AxleConfig {
 struct VehicleConfig {
     body: VehiclePartConfig,
     wheel: VehiclePartConfig,
+    drive_factor: f32,
     axles: Vec<AxleConfig>,
-}
-
-#[derive(serde::Deserialize)]
-pub struct EngineConfig {
-    shader_path: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -98,7 +35,7 @@ struct LevelConfig {
     environment: String,
     gravity: f32,
     average_luminocity: f32,
-    ground: ObjectConfig,
+    ground: blade::config::Object,
 }
 
 #[derive(serde::Deserialize)]
@@ -106,21 +43,21 @@ struct CameraConfig {
     azimuth: f32,
     altitude: f32,
     distance: f32,
-    target: mint::Vector3<f32>,
+    target: [f32; 3],
     fov: f32,
 }
 
 #[derive(serde::Deserialize)]
 struct GameConfig {
-    engine: EngineConfig,
+    engine: blade::config::Engine,
     level: LevelConfig,
     camera: CameraConfig,
     vehicle: String,
 }
 
 struct Wheel {
-    _object: engine::ObjectHandle,
-    joint: engine::JointHandle,
+    _object: blade::ObjectHandle,
+    joint: blade::JointHandle,
 }
 
 struct WheelAxle {
@@ -130,13 +67,14 @@ struct WheelAxle {
 }
 
 struct Vehicle {
-    body_handle: engine::ObjectHandle,
+    body_handle: blade::ObjectHandle,
+    drive_factor: f32,
     wheel_axles: Vec<WheelAxle>,
 }
 
 struct Game {
     // engine stuff
-    engine: engine::Engine,
+    engine: blade::Engine,
     last_physics_update: time::Instant,
     is_paused: Option<egui_gizmo::GizmoMode>,
     // windowing
@@ -144,7 +82,7 @@ struct Game {
     egui_state: egui_winit::State,
     egui_context: egui::Context,
     // game data
-    _ground_handle: engine::ObjectHandle,
+    _ground_handle: blade::ObjectHandle,
     vehicle: Vehicle,
     cam_config: CameraConfig,
 }
@@ -162,7 +100,7 @@ impl Game {
             ron::de::from_bytes(&fs::read("data/config.ron").expect("Unable to open the config"))
                 .expect("Unable to parse the config");
 
-        let mut engine = engine::Engine::new(&window, &config.engine);
+        let mut engine = blade::Engine::new(&window, &config.engine);
         engine.set_environment_map(&config.level.environment);
         engine.set_gravity(config.level.gravity);
         engine.set_average_luminosity(config.level.average_luminocity);
@@ -170,7 +108,7 @@ impl Game {
         let ground_handle = engine.add_object(
             &config.level.ground,
             nalgebra::Isometry3::default(),
-            engine::BodyType::Fixed,
+            blade::BodyType::Fixed,
         );
 
         let veh_config: VehicleConfig = ron::de::from_bytes(
@@ -178,7 +116,7 @@ impl Game {
                 .expect("Unable to open the vehicle config"),
         )
         .expect("Unable to parse the vehicle config");
-        let body_config = ObjectConfig {
+        let body_config = blade::config::Object {
             name: format!("{}/body", config.vehicle),
             visuals: vec![veh_config.body.visual],
             colliders: vec![veh_config.body.collider],
@@ -188,11 +126,12 @@ impl Game {
             body_handle: engine.add_object(
                 &body_config,
                 nalgebra::Isometry3::translation(init_pos.x, init_pos.y, init_pos.z),
-                engine::BodyType::Dynamic,
+                blade::BodyType::Dynamic,
             ),
+            drive_factor: veh_config.drive_factor,
             wheel_axles: Vec::new(),
         };
-        let wheel_config = ObjectConfig {
+        let wheel_config = blade::config::Object {
             name: format!("{}/wheel", config.vehicle),
             visuals: vec![veh_config.wheel.visual],
             colliders: vec![veh_config.wheel.collider],
@@ -207,12 +146,12 @@ impl Game {
                     init_pos + offset_left,
                     nalgebra::Vector3::y_axis().scale(consts::PI),
                 ),
-                engine::BodyType::Dynamic,
+                blade::BodyType::Dynamic,
             );
             let wheel_right = engine.add_object(
                 &wheel_config,
                 nalgebra::Isometry3::new(init_pos + offset_right, nalgebra::Vector3::zeros()),
-                engine::BodyType::Dynamic,
+                blade::BodyType::Dynamic,
             );
 
             let has_steer = ac.steer.max_angle > 0.0;
@@ -232,10 +171,10 @@ impl Game {
                     .local_frame2(nalgebra::Isometry3::rotation(
                         nalgebra::Vector3::y_axis().scale(consts::PI),
                     ))
-                    .limits(rapier3d::dynamics::JointAxis::Y, [-max_angle, max_angle])
-                    .motor_position(rapier3d::dynamics::JointAxis::X, 0.0, 1.0, 1.0)
+                    .limits(rapier3d::dynamics::JointAxis::AngY, [-max_angle, max_angle])
+                    .motor_position(rapier3d::dynamics::JointAxis::AngX, 0.0, 1.0, 1.0)
                     .motor_position(
-                        rapier3d::dynamics::JointAxis::Y,
+                        rapier3d::dynamics::JointAxis::AngY,
                         0.0,
                         ac.steer.stiffness,
                         ac.steer.damping,
@@ -248,10 +187,10 @@ impl Game {
                 rapier3d::dynamics::GenericJointBuilder::new(locked_axes)
                     .contacts_enabled(false)
                     .local_anchor1(offset_right.into())
-                    .limits(rapier3d::dynamics::JointAxis::Y, [-max_angle, max_angle])
-                    .motor_position(rapier3d::dynamics::JointAxis::X, 0.0, 1.0, 1.0)
+                    .limits(rapier3d::dynamics::JointAxis::AngY, [-max_angle, max_angle])
+                    .motor_position(rapier3d::dynamics::JointAxis::AngX, 0.0, 1.0, 1.0)
                     .motor_position(
-                        rapier3d::dynamics::JointAxis::Y,
+                        rapier3d::dynamics::JointAxis::AngY,
                         0.0,
                         ac.steer.stiffness,
                         ac.steer.damping,
@@ -293,9 +232,11 @@ impl Game {
         for wax in self.vehicle.wheel_axles.iter() {
             for &joint_handle in &[wax.left.joint, wax.right.joint] {
                 let joint = self.engine.get_joint_mut(joint_handle);
-                joint
-                    .data
-                    .set_motor_velocity(rapier3d::dynamics::JointAxis::X, velocity, 100.0);
+                joint.data.set_motor_velocity(
+                    rapier3d::dynamics::JointAxis::AngX,
+                    velocity,
+                    self.vehicle.drive_factor,
+                );
             }
         }
     }
@@ -309,7 +250,7 @@ impl Game {
             for &joint_handle in &[wax.left.joint, wax.right.joint] {
                 let joint = self.engine.get_joint_mut(joint_handle);
                 joint.data.set_motor_position(
-                    rapier3d::dynamics::JointAxis::Y,
+                    rapier3d::dynamics::JointAxis::AngY,
                     angle_rad,
                     steer.stiffness,
                     steer.damping,
@@ -456,8 +397,8 @@ impl Game {
                         Some(egui_gizmo::GizmoMode::Translate),
                         "Target",
                     );
-                    ui.add(egui::DragValue::new(&mut self.cam_config.target.y));
-                    ui.add(egui::DragValue::new(&mut self.cam_config.target.z));
+                    ui.add(egui::DragValue::new(&mut self.cam_config.target[1]));
+                    ui.add(egui::DragValue::new(&mut self.cam_config.target[2]));
                 });
                 ui.horizontal(|ui| {
                     let eps = 0.01;
@@ -547,7 +488,7 @@ impl Game {
                 &nalgebra::Vector3::from(cc.target).into(),
                 &nalgebra::Vector3::y_axis(),
             );
-            engine::Camera {
+            blade::Camera {
                 isometry: base * local.inverse(),
                 fov_y: cc.fov,
             }
@@ -562,7 +503,6 @@ impl Game {
             self.egui_context.pixels_per_point(),
         );
 
-        profiling::finish_frame!();
         egui_output.repaint_after
     }
 }
