@@ -76,7 +76,7 @@ struct Game {
     // engine stuff
     engine: blade::Engine,
     last_physics_update: time::Instant,
-    is_paused: Option<egui_gizmo::GizmoMode>,
+    is_paused: bool,
     // windowing
     window: winit::window::Window,
     egui_state: egui_winit::State,
@@ -214,7 +214,7 @@ impl Game {
         Self {
             engine,
             last_physics_update: time::Instant::now(),
-            is_paused: None,
+            is_paused: false,
             window,
             egui_state: egui_winit::State::new(event_loop),
             egui_context: egui::Context::default(),
@@ -324,64 +324,6 @@ impl Game {
         false
     }
 
-    fn add_camera_manipulation(&mut self, ui: &mut egui::Ui) {
-        let mode = match self.is_paused {
-            Some(mode) => mode,
-            None => return,
-        };
-
-        let cc = &self.cam_config;
-        let eye_dir = nalgebra::Vector3::new(
-            -cc.azimuth.sin() * cc.altitude.cos(),
-            cc.altitude.sin(),
-            -cc.azimuth.cos() * cc.altitude.cos(),
-        );
-
-        let rotation = {
-            let z = eye_dir;
-            //let x = z.cross(&nalgebra::Vector3::y_axis()).normalize();
-            let x = nalgebra::Vector3::new(cc.azimuth.cos(), 0.0, -cc.azimuth.sin());
-            //let y = z.cross(&x);
-            let y = nalgebra::Vector3::new(
-                cc.altitude.sin() * -cc.azimuth.sin(),
-                -cc.altitude.cos(),
-                cc.altitude.sin() * -cc.azimuth.cos(),
-            );
-            nalgebra::geometry::UnitQuaternion::from_rotation_matrix(
-                &nalgebra::geometry::Rotation3::from_basis_unchecked(&[x, y, z]).transpose(),
-            )
-        };
-        let view = {
-            let t = rotation * (nalgebra::Vector3::from(cc.target) - eye_dir.scale(cc.distance));
-            nalgebra::geometry::Isometry3::from_parts(t.into(), rotation)
-        };
-
-        let aspect = self.engine.screen_aspect();
-        let depth_range = 1.0f32..10000.0; //TODO?
-        let projection_matrix =
-            nalgebra::Matrix4::new_perspective(aspect, cc.fov, depth_range.start, depth_range.end);
-
-        let gizmo = egui_gizmo::Gizmo::new("Object")
-            .model_matrix(view.to_homogeneous())
-            .projection_matrix(projection_matrix)
-            .mode(mode)
-            .orientation(egui_gizmo::GizmoOrientation::Global)
-            .snapping(true);
-
-        if let Some(result) = gizmo.interact(ui) {
-            let q = nalgebra::Unit::new_normalize(nalgebra::Quaternion::from(
-                result.rotation.to_array(),
-            ));
-            let m = q.inverse().to_rotation_matrix();
-            self.cam_config.azimuth = -m[(2, 0)].atan2(m[(0, 0)]);
-            self.cam_config.altitude = (-m[(1, 1)]).acos();
-            let t_local = q
-                .inverse()
-                .transform_vector(&nalgebra::Vector3::from(result.translation.to_array()));
-            self.cam_config.target = (t_local + eye_dir.scale(self.cam_config.distance)).into();
-        }
-    }
-
     fn populate_hud(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Camera")
             .default_open(true)
@@ -392,21 +334,13 @@ impl Game {
                         .clamp_range(1.0..=100.0),
                 );
                 ui.horizontal(|ui| {
-                    ui.selectable_value(
-                        &mut self.is_paused,
-                        Some(egui_gizmo::GizmoMode::Translate),
-                        "Target",
-                    );
+                    ui.label("Target");
                     ui.add(egui::DragValue::new(&mut self.cam_config.target[1]));
                     ui.add(egui::DragValue::new(&mut self.cam_config.target[2]));
                 });
                 ui.horizontal(|ui| {
                     let eps = 0.01;
-                    ui.selectable_value(
-                        &mut self.is_paused,
-                        Some(egui_gizmo::GizmoMode::Rotate),
-                        "Angle",
-                    );
+                    ui.label("Angle");
                     ui.add(
                         egui::DragValue::new(&mut self.cam_config.azimuth)
                             .clamp_range(-consts::FRAC_PI_2..=consts::FRAC_PI_2)
@@ -419,12 +353,9 @@ impl Game {
                     );
                 });
                 ui.add(egui::Slider::new(&mut self.cam_config.fov, 0.5f32..=2.0f32).text("FOV"));
-                if self.is_paused.is_some() && ui.button("Unpause").clicked() {
-                    self.is_paused = None;
-                }
+                ui.toggle_value(&mut self.is_paused, "Pause");
             });
 
-        self.add_camera_manipulation(ui);
         self.engine.populate_hud(ui);
     }
 
@@ -455,7 +386,7 @@ impl Game {
         );
         let engine_dt = self.last_physics_update.elapsed().as_secs_f32();
         self.last_physics_update = time::Instant::now();
-        if self.is_paused.is_none() {
+        if !self.is_paused {
             self.engine.update(engine_dt);
         }
 
