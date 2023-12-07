@@ -4,26 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-blade-render = { path = "../blade/blade-render" }
-blade-asset = { path = "../blade/blade-asset" }
-blade-macros = { path = "../blade/blade-macros" }
-blade-graphics = { path = "../blade/blade-graphics" }
-blade-egui = { path = "../blade/blade-egui" }
-choir = "0.7"
-colorsys = "0.6"
+blade = { path = "../blade" }
 egui = "0.23"
 egui-gizmo = "0.12"
 egui-winit = "0.23"
 env_logger = "0.10"
 nalgebra = { version = "0.32", features = ["mint"] }
 log = "0.4"
-mint = { version = "0.5", features = ["serde"] }
-num_cpus = "1"
-profiling = "1"
-rapier3d = { version = "0.17", features = ["debug-render"] }
+rapier3d = "0.17"
 ron = "0.8"
 serde = { version = "1", features = ["serde_derive"] }
-slab = "0.4"
 winit = "0.28"
 
 [patch.crates-io]

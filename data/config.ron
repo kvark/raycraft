@@ -26,10 +26,10 @@
         ),
     ),
     camera: (
-        distance: 2,
-        azimuth: -70,
+        distance: 5,
+        azimuth: 0,
         altitude: 0.5,
-        target: (0, 0, 0),
+        target: (0, 1, 0),
         fov: 1.0,
     ),
     vehicle: "raceFuture",
