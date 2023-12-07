@@ -19,6 +19,7 @@
         ),
         collider: (
             mass: 1.0,
+            friction: 2.0,
             pos: (0, 0, 0),
             rot: (0, 0, 90),
             shape: Cylinder(
@@ -34,8 +35,8 @@
             z: 0.5,
             steer: (
                 max_angle: 30,
-                stiffness: 100,
-                damping: 0,
+                stiffness: 1000,
+                damping: 1,
             ),
         ),
         (
