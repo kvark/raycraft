@@ -57,7 +57,7 @@ struct GameConfig {
 }
 
 struct Wheel {
-    _object: blade::ObjectHandle,
+    object: blade::ObjectHandle,
     joint: blade::JointHandle,
 }
 
@@ -127,7 +127,7 @@ impl Game {
         let mut vehicle = Vehicle {
             body_handle: engine.add_object(
                 &body_config,
-                nalgebra::Isometry3::translation(init_pos.x, init_pos.y, init_pos.z),
+                nalgebra::Isometry3::new(init_pos, nalgebra::Vector3::zeros()),
                 blade::BodyType::Dynamic,
             ),
             drive_factor: veh_config.drive_factor,
@@ -138,6 +138,7 @@ impl Game {
             visuals: vec![veh_config.wheel.visual],
             colliders: vec![veh_config.wheel.collider],
         };
+        //Note: in the vehicle coordinate system X=left, Y=up, Z=forward
         for ac in veh_config.axles {
             let offset_left = nalgebra::Vector3::new(ac.x, 0.0, ac.z);
             let offset_right = nalgebra::Vector3::new(-ac.x, 0.0, ac.z);
@@ -202,11 +203,11 @@ impl Game {
 
             vehicle.wheel_axles.push(WheelAxle {
                 left: Wheel {
-                    _object: wheel_left,
+                    object: wheel_left,
                     joint: joint_left,
                 },
                 right: Wheel {
-                    _object: wheel_right,
+                    object: wheel_right,
                     joint: joint_right,
                 },
                 steer: if has_steer { Some(ac.steer) } else { None },
@@ -232,6 +233,7 @@ impl Game {
     }
 
     fn set_velocity(&mut self, velocity: f32) {
+        self.engine.wake_up(self.vehicle.body_handle);
         for wax in self.vehicle.wheel_axles.iter() {
             for &joint_handle in &[wax.left.joint, wax.right.joint] {
                 let joint = self.engine.get_joint_mut(joint_handle);
@@ -359,6 +361,28 @@ impl Game {
                 ui.toggle_value(&mut self.is_paused, "Pause");
             });
 
+        egui::CollapsingHeader::new("Wheels")
+            .default_open(true)
+            .show(ui, |ui| {
+                let veh_isometry = *self.engine.get_object_isometry(self.vehicle.body_handle);
+                for (wax_index, wax) in self.vehicle.wheel_axles.iter().enumerate() {
+                    for &(wheel, side) in &[(&wax.left, "L"), (&wax.right, "R")] {
+                        let w_isometry = self.engine.get_object_isometry(wheel.object);
+                        let joint = self.engine.get_joint(wheel.joint);
+                        let veh_frame = veh_isometry * joint.data.local_frame1;
+                        let w_frame = w_isometry * joint.data.local_frame2;
+                        let relative_rot = veh_frame.rotation.inverse() * w_frame.rotation;
+                        let (roll, pitch, yaw) = relative_rot.euler_angles();
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{wax_index}{side}:"));
+                            for angle in [roll, pitch, yaw].into_iter() {
+                                ui.colored_label(egui::Color32::WHITE, format!("{angle:.1}"));
+                            }
+                        });
+                    }
+                }
+            });
+
         self.engine.populate_hud(ui);
     }
 
@@ -409,7 +433,9 @@ impl Game {
 
             let cc = &self.cam_config;
             let smooth_t = (-engine_dt * cc.speed).exp();
-            let smooth_quat = nalgebra::UnitQuaternion::new_normalize(base_quat.lerp(&self.last_camera_base_quat, smooth_t));
+            let smooth_quat = nalgebra::UnitQuaternion::new_normalize(
+                base_quat.lerp(&self.last_camera_base_quat, smooth_t),
+            );
             let base =
                 nalgebra::geometry::Isometry3::from_parts(veh_isometry.translation, smooth_quat);
             self.last_camera_base_quat = smooth_quat;
