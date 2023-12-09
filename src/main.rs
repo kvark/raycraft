@@ -59,6 +59,7 @@ struct GameConfig {
 struct Wheel {
     object: blade::ObjectHandle,
     joint: blade::JointHandle,
+    local_rotation: nalgebra::UnitQuaternion<f32>,
 }
 
 struct WheelAxle {
@@ -157,6 +158,7 @@ impl Game {
                 blade::BodyType::Dynamic,
             );
 
+            let joint_kind = blade::JointKind::Soft;
             let has_steer = ac.steer.max_angle > 0.0;
             let max_angle = ac.steer.max_angle.to_radians();
             let locked_axes = if has_steer {
@@ -165,15 +167,16 @@ impl Game {
             } else {
                 rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES
             };
+
+            let left_frame =
+                nalgebra::Isometry3::rotation(nalgebra::Vector3::y_axis().scale(consts::PI));
             let joint_left = engine.add_joint(
                 vehicle.body_handle,
                 wheel_left,
                 rapier3d::dynamics::GenericJointBuilder::new(locked_axes)
                     .contacts_enabled(false)
                     .local_anchor1(offset_left.into())
-                    .local_frame2(nalgebra::Isometry3::rotation(
-                        nalgebra::Vector3::y_axis().scale(consts::PI),
-                    ))
+                    .local_frame2(left_frame)
                     .limits(rapier3d::dynamics::JointAxis::AngY, [-max_angle, max_angle])
                     .motor_position(rapier3d::dynamics::JointAxis::AngX, 0.0, 1.0, 1.0)
                     .motor_position(
@@ -183,6 +186,7 @@ impl Game {
                         ac.steer.damping,
                     )
                     .build(),
+                joint_kind,
             );
             let joint_right = engine.add_joint(
                 vehicle.body_handle,
@@ -199,16 +203,19 @@ impl Game {
                         ac.steer.damping,
                     )
                     .build(),
+                joint_kind,
             );
 
             vehicle.wheel_axles.push(WheelAxle {
                 left: Wheel {
                     object: wheel_left,
                     joint: joint_left,
+                    local_rotation: left_frame.rotation,
                 },
                 right: Wheel {
                     object: wheel_right,
                     joint: joint_right,
+                    local_rotation: nalgebra::UnitQuaternion::default(),
                 },
                 steer: if has_steer { Some(ac.steer) } else { None },
             });
@@ -236,8 +243,7 @@ impl Game {
         self.engine.wake_up(self.vehicle.body_handle);
         for wax in self.vehicle.wheel_axles.iter() {
             for &joint_handle in &[wax.left.joint, wax.right.joint] {
-                let joint = self.engine.get_joint_mut(joint_handle);
-                joint.data.set_motor_velocity(
+                self.engine[joint_handle].set_motor_velocity(
                     rapier3d::dynamics::JointAxis::AngX,
                     velocity,
                     self.vehicle.drive_factor,
@@ -253,13 +259,40 @@ impl Game {
                 None => continue,
             };
             for &joint_handle in &[wax.left.joint, wax.right.joint] {
-                let joint = self.engine.get_joint_mut(joint_handle);
-                joint.data.set_motor_position(
+                self.engine[joint_handle].set_motor_position(
                     rapier3d::dynamics::JointAxis::AngY,
                     angle_rad,
                     steer.stiffness,
                     steer.damping,
                 );
+            }
+        }
+    }
+
+    /// When front wheels are steered, their axis changes.
+    /// This routine re-aligns the axis of rotation every frame.
+    fn align_wheels(&mut self) {
+        let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
+        let veh_y_axis = veh_isometry.transform_vector(&nalgebra::Vector3::y_axis());
+        for wax in self.vehicle.wheel_axles.iter() {
+            if wax.steer.is_none() {
+                continue;
+            }
+            for &wheel in &[&wax.left, &wax.right] {
+                let w_isometry = *self.engine.get_object_isometry(wheel.object);
+                let mut joint = &mut self.engine[wheel.joint];
+                let veh_y_in_wheel_frame = w_isometry.inverse().transform_vector(&veh_y_axis);
+                let x_angle = veh_y_in_wheel_frame.z.atan2(veh_y_in_wheel_frame.y);
+                let sign = wheel
+                    .local_rotation
+                    .transform_vector(&nalgebra::Vector3::x_axis())
+                    .x
+                    .signum();
+                let local_rot = nalgebra::UnitQuaternion::from_axis_angle(
+                    &nalgebra::Vector3::x_axis(),
+                    sign * x_angle,
+                );
+                joint.local_frame2.rotation = wheel.local_rotation * local_rot;
             }
         }
     }
@@ -361,28 +394,6 @@ impl Game {
                 ui.toggle_value(&mut self.is_paused, "Pause");
             });
 
-        egui::CollapsingHeader::new("Wheels")
-            .default_open(true)
-            .show(ui, |ui| {
-                let veh_isometry = *self.engine.get_object_isometry(self.vehicle.body_handle);
-                for (wax_index, wax) in self.vehicle.wheel_axles.iter().enumerate() {
-                    for &(wheel, side) in &[(&wax.left, "L"), (&wax.right, "R")] {
-                        let w_isometry = self.engine.get_object_isometry(wheel.object);
-                        let joint = self.engine.get_joint(wheel.joint);
-                        let veh_frame = veh_isometry * joint.data.local_frame1;
-                        let w_frame = w_isometry * joint.data.local_frame2;
-                        let relative_rot = veh_frame.rotation.inverse() * w_frame.rotation;
-                        let (roll, pitch, yaw) = relative_rot.euler_angles();
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{wax_index}{side}:"));
-                            for angle in [roll, pitch, yaw].into_iter() {
-                                ui.colored_label(egui::Color32::WHITE, format!("{angle:.1}"));
-                            }
-                        });
-                    }
-                }
-            });
-
         self.engine.populate_hud(ui);
     }
 
@@ -414,6 +425,7 @@ impl Game {
         let engine_dt = self.last_physics_update.elapsed().as_secs_f32();
         self.last_physics_update = time::Instant::now();
         if !self.is_paused {
+            self.align_wheels();
             self.engine.update(engine_dt);
         }
 
