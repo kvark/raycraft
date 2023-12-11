@@ -11,6 +11,6 @@
         target: (0, 1, 0),
         fov: 1.0,
     ),
-    level: "plane",
+    level: "noise",
     vehicle: "raceFuture",
 )
