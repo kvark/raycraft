@@ -1,38 +1,16 @@
 (
     engine: (
         shader_path: "../blade/blade-render/code",
-    ),
-    level: (
-        environment: "HDR_029_Sky_Cloudy_Ref.hdr",
-        gravity: 9.81,
-        average_luminocity: 0.1,
-        ground: (
-            name: "ground",
-            visuals: [
-                (
-                    model: "ground.glb",
-                    scale: 100,
-                ),
-            ],
-            colliders: [
-                (
-                    mass: 100000.0,
-                    friction: 1.0,
-                    pos: (0, -1, 0),
-                    shape: Cuboid(
-                        half: (100000, 1, 100000),
-                    ),
-                ),
-            ],
-        ),
+        data_path: "data",
     ),
     camera: (
         distance: 5,
         azimuth: 0,
         altitude: 0.5,
-        speed: 0.0,
+        speed: 0.3,
         target: (0, 1, 0),
         fov: 1.0,
     ),
+    level: "plane",
     vehicle: "raceFuture",
 )

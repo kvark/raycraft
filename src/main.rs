@@ -51,8 +51,8 @@ struct CameraConfig {
 #[derive(serde::Deserialize)]
 struct GameConfig {
     engine: blade::config::Engine,
-    level: LevelConfig,
     camera: CameraConfig,
+    level: String,
     vehicle: String,
 }
 
@@ -102,14 +102,19 @@ impl Game {
         let config: GameConfig =
             ron::de::from_bytes(&fs::read("data/config.ron").expect("Unable to open the config"))
                 .expect("Unable to parse the config");
-
         let mut engine = blade::Engine::new(&window, &config.engine);
-        engine.set_environment_map(&config.level.environment);
-        engine.set_gravity(config.level.gravity);
-        engine.set_average_luminosity(config.level.average_luminocity);
+
+        let lev_config: LevelConfig = ron::de::from_bytes(
+            &fs::read(format!("data/levels/{}.ron", config.level))
+                .expect("Unable to open the level config"),
+        )
+        .expect("Unable to parse the level config");
+        engine.set_environment_map(&lev_config.environment);
+        engine.set_gravity(lev_config.gravity);
+        engine.set_average_luminosity(lev_config.average_luminocity);
 
         let ground_handle = engine.add_object(
-            &config.level.ground,
+            &lev_config.ground,
             nalgebra::Isometry3::default(),
             blade::BodyType::Fixed,
         );
