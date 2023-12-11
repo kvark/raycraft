@@ -194,6 +194,7 @@ dependencies = [
 name = "blade"
 version = "0.2.0"
 dependencies = [
+ "base64",
  "blade-asset",
  "blade-egui",
  "blade-graphics",
@@ -201,6 +202,7 @@ dependencies = [
  "choir",
  "colorsys",
  "egui",
+ "gltf",
  "log",
  "mint",
  "nalgebra",
