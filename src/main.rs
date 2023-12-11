@@ -35,6 +35,7 @@ struct LevelConfig {
     environment: String,
     gravity: f32,
     average_luminocity: f32,
+    spawn_pos: [f32; 3],
     ground: blade::config::Object,
 }
 
@@ -129,7 +130,7 @@ impl Game {
             visuals: vec![veh_config.body.visual],
             colliders: vec![veh_config.body.collider],
         };
-        let init_pos = nalgebra::Vector3::new(0.0, 10.0, 0.0);
+        let init_pos = nalgebra::Vector3::from(lev_config.spawn_pos);
         let mut vehicle = Vehicle {
             body_handle: engine.add_object(
                 &body_config,
