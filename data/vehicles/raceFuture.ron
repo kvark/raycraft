@@ -29,6 +29,7 @@
         ),
     ),
     drive_factor: 10.0,
+    jump_impulse: 10,
     axles: [
         (
             x: 0.5,

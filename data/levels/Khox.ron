@@ -1,13 +1,13 @@
 (
-    environment: "HDR_029_Sky_Cloudy_Ref.hdr",
-    gravity: 9.81,
-    average_luminocity: 0.1,
-    spawn_pos: (0, 5, 0),
+    environment: "Vangers/starmap_2020_4k.exr",
+    gravity: 196.2,
+    average_luminocity: 0.01,
+    spawn_pos: (180, 200, -465),
     ground: (
         name: "ground",
         visuals: [
             (
-                model: "ground-noise.glb",
+                model: "Vangers/khox-opt.glb",
             ),
         ],
         colliders: [
@@ -15,7 +15,7 @@
                 mass: 100000.0,
                 friction: 1.0,
                 shape: TriMesh(
-                    model: "ground-noise.glb",
+                    model: "Vangers/khox-opt.glb",
                 ),
             ),
         ],
