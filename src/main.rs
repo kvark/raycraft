@@ -26,6 +26,7 @@ struct VehicleConfig {
     body: VehiclePartConfig,
     wheel: VehiclePartConfig,
     drive_factor: f32,
+    jump_impulse: f32,
     axles: Vec<AxleConfig>,
 }
 
@@ -72,6 +73,7 @@ struct WheelAxle {
 struct Vehicle {
     body_handle: blade::ObjectHandle,
     drive_factor: f32,
+    jump_impulse: f32,
     wheel_axles: Vec<WheelAxle>,
 }
 
@@ -89,6 +91,7 @@ struct Game {
     _ground_handle: blade::ObjectHandle,
     vehicle: Vehicle,
     cam_config: CameraConfig,
+    spawn_pos: nalgebra::Vector3<f32>,
 }
 
 impl Game {
@@ -138,6 +141,7 @@ impl Game {
                 blade::BodyType::Dynamic,
             ),
             drive_factor: veh_config.drive_factor,
+            jump_impulse: veh_config.jump_impulse,
             wheel_axles: Vec::new(),
         };
         let wheel_config = blade::config::Object {
@@ -238,6 +242,7 @@ impl Game {
             _ground_handle: ground_handle,
             vehicle,
             cam_config: config.camera,
+            spawn_pos: init_pos,
         }
     }
 
@@ -303,6 +308,26 @@ impl Game {
         }
     }
 
+    fn teleport(&mut self, position: nalgebra::Vector3<f32>) {
+        let old_isometry_inv = self
+            .engine
+            .get_object_isometry(self.vehicle.body_handle)
+            .inverse();
+        let new_isometry = nalgebra::Isometry3 {
+            rotation: Default::default(),
+            translation: position.into(),
+        };
+        self.engine
+            .teleport_object(self.vehicle.body_handle, new_isometry);
+        for wax in self.vehicle.wheel_axles.iter() {
+            for wheel_object in [wax.left.object, wax.right.object].into_iter() {
+                let prev = self.engine.get_object_isometry(wheel_object);
+                let next = new_isometry * old_isometry_inv * prev;
+                self.engine.teleport_object(wheel_object, next);
+            }
+        }
+    }
+
     fn on_event(&mut self, event: &winit::event::WindowEvent) -> bool {
         let response = self.egui_state.on_event(&self.egui_context, event);
         if response.consumed {
@@ -338,8 +363,10 @@ impl Game {
                     self.set_steering(-1.0);
                 }
                 winit::event::VirtualKeyCode::Space => {
-                    self.engine
-                        .apply_impulse(self.vehicle.body_handle, [0.0, 10.0, 0.0].into());
+                    self.engine.apply_impulse(
+                        self.vehicle.body_handle,
+                        [0.0, self.vehicle.jump_impulse, 0.0].into(),
+                    );
                 }
                 _ => {}
             },
@@ -373,9 +400,9 @@ impl Game {
             .default_open(true)
             .show(ui, |ui| {
                 ui.add(
-                    egui::DragValue::new(&mut self.cam_config.distance)
-                        .prefix("Distance")
-                        .clamp_range(1.0..=100.0),
+                    egui::Slider::new(&mut self.cam_config.distance, 1.0..=1000.0)
+                        .text("Distance")
+                        .logarithmic(true),
                 );
                 ui.horizontal(|ui| {
                     ui.label("Target");
@@ -387,7 +414,7 @@ impl Game {
                     ui.label("Angle");
                     ui.add(
                         egui::DragValue::new(&mut self.cam_config.azimuth)
-                            .clamp_range(-consts::FRAC_PI_2..=consts::FRAC_PI_2)
+                            .clamp_range(-consts::PI..=consts::PI)
                             .speed(0.1),
                     );
                     ui.add(
@@ -397,7 +424,34 @@ impl Game {
                     );
                 });
                 ui.add(egui::Slider::new(&mut self.cam_config.fov, 0.5f32..=2.0f32).text("FOV"));
+                ui.add(
+                    egui::Slider::new(&mut self.cam_config.speed, 0.0..=1.0).text("Rotate speed"),
+                );
                 ui.toggle_value(&mut self.is_paused, "Pause");
+            });
+
+        egui::CollapsingHeader::new("Dynamics")
+            .default_open(true)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Spawn pos");
+                    ui.add(egui::DragValue::new(&mut self.spawn_pos.x));
+                    ui.add(egui::DragValue::new(&mut self.spawn_pos.y));
+                    ui.add(egui::DragValue::new(&mut self.spawn_pos.z));
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Recover").clicked() {
+                        let pos = self
+                            .engine
+                            .get_object_isometry(self.vehicle.body_handle)
+                            .translation
+                            .vector;
+                        self.teleport(pos + nalgebra::Vector3::new(0.0, 20.0, 0.0));
+                    }
+                    if ui.button("Respawn").clicked() {
+                        self.teleport(self.spawn_pos);
+                    }
+                });
             });
 
         self.engine.populate_hud(ui);

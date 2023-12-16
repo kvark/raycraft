@@ -1,14 +1,14 @@
 (
     environment: "HDR_029_Sky_Cloudy_Ref.hdr",
-    gravity: 981.0,
+    gravity: 196.2,
     average_luminocity: 0.1,
-    spawn_pos: (0, 20, 0),
+    spawn_pos: (550, 200, -7200),
     ground: (
         name: "ground",
         visuals: [
             (
-                model: "ground.glb",
-                scale: 100,
+                model: "Vangers/Fostral.glb",
+                rot: (-90, 0, 0),
             ),
         ],
         colliders: [
@@ -16,10 +16,10 @@
                 mass: 100000.0,
                 friction: 1.0,
                 restitution: 0.5,
-                pos: (0, -1, 0),
-                shape: Cuboid(
-                    half: (100000, 1, 100000),
+                shape: TriMesh(
+                    model: "Vangers/Fostral-shape.glb",
                 ),
+                rot: (-90, 0, 0),
             ),
         ],
     ),

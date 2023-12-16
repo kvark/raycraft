@@ -1,0 +1,49 @@
+(
+    body: (
+        visual: (
+            model: "Vangers/m4/body.glb",
+            front_face: Cw,
+            pos: (0, 5, 0),
+        ),
+        collider: (
+            mass: 5.0,
+            pos: (0, 6, -3),
+            shape: TriMesh(
+                model: "Vangers/m4/shape.glb",
+            ),
+        ),
+    ),
+    wheel: (
+        visual: (
+            model: "Vangers/m4/wheel.glb",
+            front_face: Cw,
+        ),
+        collider: (
+            mass: 0.5,
+            friction: 2.0,
+            pos: (0, 0, 0),
+            rot: (0, 0, 90),
+            shape: Cylinder(
+                half_height: 1.5,
+                radius: 3.0,
+            ),
+        ),
+    ),
+    drive_factor: 5.0,
+    jump_impulse: 250,
+    axles: [
+        (
+            x: 7.5,
+            z: 11,
+            steer: (
+                max_angle: 30,
+                stiffness: 10000,
+                damping: 10,
+            ),
+        ),
+        (
+            x: 7.5,
+            z: -12,
+        ),
+    ],
+)
