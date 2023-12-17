@@ -29,15 +29,16 @@
             ),
         ),
     ),
-    drive_factor: 5.0,
+    drive_factor: 10.0,
     jump_impulse: 250,
+    roll_impulse: 500,
     axles: [
         (
             x: 7.5,
             z: 11,
             steer: (
                 max_angle: 30,
-                stiffness: 10000,
+                stiffness: 20000,
                 damping: 10,
             ),
         ),
