@@ -27,6 +27,7 @@ struct VehicleConfig {
     wheel: VehiclePartConfig,
     drive_factor: f32,
     jump_impulse: f32,
+    roll_impulse: f32,
     axles: Vec<AxleConfig>,
 }
 
@@ -74,6 +75,7 @@ struct Vehicle {
     body_handle: blade::ObjectHandle,
     drive_factor: f32,
     jump_impulse: f32,
+    roll_impulse: f32,
     wheel_axles: Vec<WheelAxle>,
 }
 
@@ -142,6 +144,7 @@ impl Game {
             ),
             drive_factor: veh_config.drive_factor,
             jump_impulse: veh_config.jump_impulse,
+            roll_impulse: veh_config.roll_impulse,
             wheel_axles: Vec::new(),
         };
         let wheel_config = blade::config::Object {
@@ -283,27 +286,23 @@ impl Game {
     /// When front wheels are steered, their axis changes.
     /// This routine re-aligns the axis of rotation every frame.
     fn align_wheels(&mut self) {
-        let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
+        let veh_isometry = self
+            .engine
+            .get_object_isometry_approx(self.vehicle.body_handle);
         let veh_y_axis = veh_isometry.transform_vector(&nalgebra::Vector3::y_axis());
         for wax in self.vehicle.wheel_axles.iter() {
             if wax.steer.is_none() {
                 continue;
             }
             for &wheel in &[&wax.left, &wax.right] {
-                let w_isometry = *self.engine.get_object_isometry(wheel.object);
+                let w_isometry = *self.engine.get_object_isometry_approx(wheel.object);
                 let mut joint = &mut self.engine[wheel.joint];
                 let veh_y_in_wheel_frame = w_isometry.inverse().transform_vector(&veh_y_axis);
-                let x_angle = veh_y_in_wheel_frame.z.atan2(veh_y_in_wheel_frame.y);
-                let sign = wheel
-                    .local_rotation
-                    .transform_vector(&nalgebra::Vector3::x_axis())
-                    .x
-                    .signum();
                 let local_rot = nalgebra::UnitQuaternion::from_axis_angle(
                     &nalgebra::Vector3::x_axis(),
-                    sign * x_angle,
+                    veh_y_in_wheel_frame.z.atan2(veh_y_in_wheel_frame.y),
                 );
-                joint.local_frame2.rotation = wheel.local_rotation * local_rot;
+                joint.local_frame2.rotation = local_rot * wheel.local_rotation;
             }
         }
     }
@@ -311,7 +310,7 @@ impl Game {
     fn teleport(&mut self, position: nalgebra::Vector3<f32>) {
         let old_isometry_inv = self
             .engine
-            .get_object_isometry(self.vehicle.body_handle)
+            .get_object_isometry_approx(self.vehicle.body_handle)
             .inverse();
         let new_isometry = nalgebra::Isometry3 {
             rotation: Default::default(),
@@ -321,7 +320,7 @@ impl Game {
             .teleport_object(self.vehicle.body_handle, new_isometry);
         for wax in self.vehicle.wheel_axles.iter() {
             for wheel_object in [wax.left.object, wax.right.object].into_iter() {
-                let prev = self.engine.get_object_isometry(wheel_object);
+                let prev = self.engine.get_object_isometry_approx(wheel_object);
                 let next = new_isometry * old_isometry_inv * prev;
                 self.engine.teleport_object(wheel_object, next);
             }
@@ -362,11 +361,34 @@ impl Game {
                 winit::event::VirtualKeyCode::Right => {
                     self.set_steering(-1.0);
                 }
-                winit::event::VirtualKeyCode::Space => {
-                    self.engine.apply_impulse(
+                winit::event::VirtualKeyCode::Comma => {
+                    let forward = self
+                        .engine
+                        .get_object_isometry(self.vehicle.body_handle)
+                        .transform_vector(&nalgebra::Vector3::z_axis());
+                    self.engine.apply_torque_impulse(
                         self.vehicle.body_handle,
-                        [0.0, self.vehicle.jump_impulse, 0.0].into(),
+                        -self.vehicle.roll_impulse * forward,
                     );
+                }
+                winit::event::VirtualKeyCode::Period => {
+                    let forward = self
+                        .engine
+                        .get_object_isometry(self.vehicle.body_handle)
+                        .transform_vector(&nalgebra::Vector3::z_axis());
+                    self.engine.apply_torque_impulse(
+                        self.vehicle.body_handle,
+                        self.vehicle.roll_impulse * forward,
+                    );
+                }
+                winit::event::VirtualKeyCode::Space => {
+                    let mut up = self
+                        .engine
+                        .get_object_isometry(self.vehicle.body_handle)
+                        .transform_vector(&nalgebra::Vector3::y_axis());
+                    up.y = up.y.abs();
+                    self.engine
+                        .apply_impulse(self.vehicle.body_handle, self.vehicle.jump_impulse * up);
                 }
                 _ => {}
             },
@@ -443,7 +465,7 @@ impl Game {
                     if ui.button("Recover").clicked() {
                         let pos = self
                             .engine
-                            .get_object_isometry(self.vehicle.body_handle)
+                            .get_object_isometry_approx(self.vehicle.body_handle)
                             .translation
                             .vector;
                         self.teleport(pos + nalgebra::Vector3::new(0.0, 20.0, 0.0));
@@ -452,6 +474,12 @@ impl Game {
                         self.teleport(self.spawn_pos);
                     }
                 });
+                ui.add(
+                    egui::DragValue::new(&mut self.vehicle.jump_impulse).prefix("Jump impulse: "),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut self.vehicle.roll_impulse).prefix("Roll impulse: "),
+                );
             });
 
         self.engine.populate_hud(ui);

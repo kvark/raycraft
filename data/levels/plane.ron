@@ -15,7 +15,7 @@
             (
                 mass: 100000.0,
                 friction: 1.0,
-                restitution: 0.5,
+                restitution: 0.1,
                 pos: (0, -1, 0),
                 shape: Cuboid(
                     half: (100000, 1, 100000),

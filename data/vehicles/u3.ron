@@ -31,6 +31,7 @@
     ),
     drive_factor: 5.0,
     jump_impulse: 1000,
+    roll_impulse: 1000,
     axles: [
         (
             x: 9,

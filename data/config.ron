@@ -2,6 +2,7 @@
     engine: (
         shader_path: "../blade/blade-render/code",
         data_path: "data",
+        time_step: 0.01,
     ),
     camera: (
         distance: 50,
