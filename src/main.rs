@@ -83,6 +83,7 @@ struct Game {
     // engine stuff
     engine: blade::Engine,
     last_physics_update: time::Instant,
+    last_camera_update: time::Instant,
     last_camera_base_quat: nalgebra::UnitQuaternion<f32>,
     is_paused: bool,
     // windowing
@@ -237,6 +238,7 @@ impl Game {
         Self {
             engine,
             last_physics_update: time::Instant::now(),
+            last_camera_update: time::Instant::now(),
             last_camera_base_quat: Default::default(),
             is_paused: false,
             window,
@@ -255,6 +257,7 @@ impl Game {
 
     fn set_velocity(&mut self, velocity: f32) {
         self.engine.wake_up(self.vehicle.body_handle);
+        self.update_time();
         for wax in self.vehicle.wheel_axles.iter() {
             for &joint_handle in &[wax.left.joint, wax.right.joint] {
                 self.engine[joint_handle].set_motor_velocity(
@@ -267,6 +270,7 @@ impl Game {
     }
 
     fn set_steering(&mut self, angle_rad: f32) {
+        self.update_time();
         for wax in self.vehicle.wheel_axles.iter() {
             let steer = match wax.steer {
                 Some(ref steer) => steer,
@@ -327,6 +331,15 @@ impl Game {
         }
     }
 
+    fn update_time(&mut self) {
+        let engine_dt = self.last_physics_update.elapsed().as_secs_f32();
+        self.last_physics_update = time::Instant::now();
+        if !self.is_paused {
+            //self.align_wheels();
+            self.engine.update(engine_dt);
+        }
+    }
+
     fn on_event(&mut self, event: &winit::event::WindowEvent) -> bool {
         let response = self.egui_state.on_event(&self.egui_context, event);
         if response.consumed {
@@ -364,7 +377,7 @@ impl Game {
                 winit::event::VirtualKeyCode::Comma => {
                     let forward = self
                         .engine
-                        .get_object_isometry(self.vehicle.body_handle)
+                        .get_object_isometry_approx(self.vehicle.body_handle)
                         .transform_vector(&nalgebra::Vector3::z_axis());
                     self.engine.apply_torque_impulse(
                         self.vehicle.body_handle,
@@ -374,7 +387,7 @@ impl Game {
                 winit::event::VirtualKeyCode::Period => {
                     let forward = self
                         .engine
-                        .get_object_isometry(self.vehicle.body_handle)
+                        .get_object_isometry_approx(self.vehicle.body_handle)
                         .transform_vector(&nalgebra::Vector3::z_axis());
                     self.engine.apply_torque_impulse(
                         self.vehicle.body_handle,
@@ -384,7 +397,7 @@ impl Game {
                 winit::event::VirtualKeyCode::Space => {
                     let mut up = self
                         .engine
-                        .get_object_isometry(self.vehicle.body_handle)
+                        .get_object_isometry_approx(self.vehicle.body_handle)
                         .transform_vector(&nalgebra::Vector3::y_axis());
                     up.y = up.y.abs();
                     self.engine
@@ -486,6 +499,8 @@ impl Game {
     }
 
     fn on_draw(&mut self) -> time::Duration {
+        self.update_time();
+
         let raw_input = self.egui_state.take_egui_input(&self.window);
         let egui_context = mem::take(&mut self.egui_context);
         let egui_output = egui_context.run(raw_input, |egui_ctx| {
@@ -510,12 +525,6 @@ impl Game {
             &self.egui_context,
             egui_output.platform_output,
         );
-        let engine_dt = self.last_physics_update.elapsed().as_secs_f32();
-        self.last_physics_update = time::Instant::now();
-        if !self.is_paused {
-            self.align_wheels();
-            self.engine.update(engine_dt);
-        }
 
         let camera = {
             let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
@@ -531,8 +540,11 @@ impl Game {
                     nalgebra::Vector3::y_axis().scale(projection),
                 ));
 
+            let camera_dt = self.last_camera_update.elapsed().as_secs_f32();
+            self.last_physics_update = time::Instant::now();
+
             let cc = &self.cam_config;
-            let smooth_t = (-engine_dt * cc.speed).exp();
+            let smooth_t = (-camera_dt * cc.speed).exp();
             let smooth_quat = nalgebra::UnitQuaternion::new_normalize(
                 base_quat.lerp(&self.last_camera_base_quat, smooth_t),
             );
