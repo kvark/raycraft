@@ -18,8 +18,8 @@
             model: "car-kit/wheelRacing.glb",
         ),
         collider: (
-            mass: 1.0,
-            friction: 2.0,
+            mass: 5.0,
+            friction: 1.0,
             pos: (0, 0, 0),
             rot: (0, 0, 90),
             shape: Cylinder(
@@ -28,7 +28,7 @@
             ),
         ),
     ),
-    drive_factor: 5.0,
+    drive_factor: 15.0,
     jump_impulse: 10,
     roll_impulse: 10,
     axles: [
@@ -38,7 +38,7 @@
             steer: (
                 max_angle: 30,
                 stiffness: 1000,
-                damping: 1,
+                damping: 10,
             ),
         ),
         (
