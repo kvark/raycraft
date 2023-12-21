@@ -6,19 +6,20 @@
             rot: (0, 180, 0),
         ),
         collider: (
-            mass: 10.0,
+            density: 100.0,
             pos: (0, 0.1, -0.1),
             shape: Cuboid(
                 half: (0.7, 0.2, 1.2),
             ),
         ),
+        height: 0.1,
     ),
     wheel: (
         visual: (
             model: "car-kit/wheelRacing.glb",
         ),
         collider: (
-            mass: 5.0,
+            density: 400.0,
             friction: 1.0,
             pos: (0, 0, 0),
             rot: (0, 0, 90),
@@ -33,16 +34,28 @@
     roll_impulse: 10,
     axles: [
         (
-            x: 0.5,
+            xs: [-0.5, 0.5],
             z: 0.5,
-            steer: (
-                max_angle: 30,
-                stiffness: 1000,
-                damping: 10,
+            additional_mass: Some((
+                density: 100.0,
+                shape: Cylinder(
+                    half_height: 0.2,
+                    radius: 0.1,
+                ),
+            )),
+            suspension: (
+                limit: 0.5,
+                stiffness: 100000,
+                damping: 10000,
+            ),
+            steering: (
+                limit: 30,
+                stiffness: 10000,
+                damping: 1000,
             ),
         ),
         (
-            x: 0.5,
+            xs: [-0.5, 0.5],
             z: -1.0,
         ),
     ],
