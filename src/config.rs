@@ -2,7 +2,6 @@
 pub struct Body {
     pub visual: blade::config::Visual,
     pub collider: blade::config::Collider,
-    pub height: f32,
 }
 
 #[derive(serde::Deserialize)]
@@ -20,20 +19,31 @@ pub struct Motor {
 
 #[derive(serde::Deserialize)]
 pub struct Axle {
+    /// Side offset for each wheel.
+    pub x_wheels: Vec<f32>,
+    /// Height offset from the body.
+    pub y: f32,
+    /// Forward offset from the body.
     pub z: f32,
-    pub xs: Vec<f32>,
-    #[serde(default)]
-    pub additional_mass: Option<blade::config::AdditionalMass>,
     #[serde(default)]
     pub suspension: Motor,
     #[serde(default)]
     pub steering: Motor,
 }
 
+fn default_additional_mass() -> blade::config::AdditionalMass {
+    blade::config::AdditionalMass {
+        density: 0.0,
+        shape: blade::config::Shape::Ball { radius: 0.0 },
+    }
+}
+
 #[derive(serde::Deserialize)]
 pub struct Vehicle {
     pub body: Body,
     pub wheel: Wheel,
+    #[serde(default = "default_additional_mass")]
+    pub suspender: blade::config::AdditionalMass,
     pub drive_factor: f32,
     pub jump_impulse: f32,
     pub roll_impulse: f32,
