@@ -550,17 +550,18 @@ impl Game {
                 .quaternion()
                 .imag()
                 .dot(&nalgebra::Vector3::y_axis());
-            let base_quat =
-                nalgebra::UnitQuaternion::new_normalize(nalgebra::Quaternion::from_parts(
-                    veh_isometry.rotation.quaternion().w,
-                    nalgebra::Vector3::y_axis().scale(projection),
-                ));
+            let base_quat_nonorm = nalgebra::Quaternion::from_parts(
+                veh_isometry.rotation.quaternion().w,
+                nalgebra::Vector3::y_axis().scale(projection),
+            );
+            let validity = base_quat_nonorm.norm();
+            let base_quat = nalgebra::UnitQuaternion::new_normalize(base_quat_nonorm);
 
             let camera_dt = self.last_camera_update.elapsed().as_secs_f32();
             self.last_physics_update = time::Instant::now();
 
             let cc = &self.cam_config;
-            let smooth_t = (-camera_dt * cc.speed).exp();
+            let smooth_t = (-camera_dt * cc.speed * validity).exp();
             let smooth_quat = nalgebra::UnitQuaternion::new_normalize(
                 base_quat.lerp(&self.last_camera_base_quat, smooth_t),
             );
