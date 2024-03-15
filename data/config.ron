@@ -5,13 +5,13 @@
         time_step: 0.01,
     ),
     camera: (
-        distance: 50,
+        distance: 5,
         azimuth: 0,
         altitude: 0.5,
         speed: 0.75,
         target: (0, 1, 0),
         fov: 1.0,
     ),
-    level: "Fostral",
-    vehicle: "m4",
+    level: "plane",
+    vehicle: "raceFuture",
 )

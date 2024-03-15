@@ -1,6 +1,6 @@
 (
     environment: "HDR_029_Sky_Cloudy_Ref.hdr",
-    gravity: 981.0,
+    gravity: 9.81,
     average_luminocity: 0.1,
     spawn_pos: (0, 20, 0),
     ground: (
@@ -15,7 +15,6 @@
             (
                 density: 100000.0,
                 friction: 1.0,
-                restitution: 0.1,
                 pos: (0, -1, 0),
                 shape: Cuboid(
                     half: (100000, 1, 100000),

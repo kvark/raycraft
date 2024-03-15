@@ -6,7 +6,7 @@
             pos: (0, 2, 0),
         ),
         collider: (
-            mass: 10.0,
+            density: 10.0,
             pos: (0, 2, 0),
             shape: TriMesh(
                 model: "Vangers/u3/body-shape.glb",
@@ -19,7 +19,7 @@
             front_face: Cw,
         ),
         collider: (
-            mass: 1.0,
+            density: 10.0,
             friction: 2.0,
             pos: (0, 0, 0),
             rot: (0, 0, 90),
@@ -36,6 +36,13 @@
         (
             x: 9,
             z: 11,
+            additional_mass: Some((
+                density: 100.0,
+                shape: Cylinder(
+                    half_height: 3.0,
+                    radius: 2.0,
+                ),
+            )),
             steer: (
                 max_angle: 30,
                 stiffness: 1000,

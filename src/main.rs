@@ -33,7 +33,7 @@ struct Game {
     // windowing
     window: winit::window::Window,
     egui_state: egui_winit::State,
-    egui_context: egui::Context,
+    egui_viewport_id: egui::ViewportId,
     // game data
     _ground_handle: blade::ObjectHandle,
     vehicle: Vehicle,
@@ -44,6 +44,15 @@ struct Game {
 const SUSPENSION_AXIS: rapier3d::dynamics::JointAxis = rapier3d::dynamics::JointAxis::Y;
 const STEERING_AXIS: rapier3d::dynamics::JointAxis = rapier3d::dynamics::JointAxis::AngY;
 const SPIN_AXIS: rapier3d::dynamics::JointAxis = rapier3d::dynamics::JointAxis::AngX;
+
+#[derive(Debug)]
+struct QuitEvent;
+
+impl Drop for Game {
+    fn drop(&mut self) {
+        self.engine.destroy();
+    }
+}
 
 impl Game {
     fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Self {
@@ -141,10 +150,7 @@ impl Game {
 
                     let suspender_handle = engine.add_object(
                         &suspender_config,
-                        nalgebra::Isometry3::new(
-                            spawn_pos + offset,
-                            nalgebra::Vector3::zeros(),
-                        ),
+                        nalgebra::Isometry3::new(spawn_pos + offset, nalgebra::Vector3::zeros()),
                         blade::BodyType::Dynamic,
                     );
 
@@ -175,10 +181,12 @@ impl Game {
                     let wheel_joint = engine.add_joint(
                         suspender_handle,
                         wheel_handle,
-                        rapier3d::dynamics::GenericJointBuilder::new(rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES)
-                            .contacts_enabled(false)
-                            .local_frame2(nalgebra::Isometry3::rotation(rotation))
-                            .build(),
+                        rapier3d::dynamics::GenericJointBuilder::new(
+                            rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES,
+                        )
+                        .contacts_enabled(false)
+                        .local_frame2(nalgebra::Isometry3::rotation(rotation))
+                        .build(),
                         joint_kind,
                     );
 
@@ -232,6 +240,11 @@ impl Game {
             });
         }
 
+        let egui_context = egui::Context::default();
+        let egui_viewport_id = egui_context.viewport_id();
+        let egui_state =
+            egui_winit::State::new(egui_context, egui_viewport_id, &window, None, None);
+
         Self {
             engine,
             last_physics_update: time::Instant::now(),
@@ -239,17 +252,13 @@ impl Game {
             last_camera_base_quat: Default::default(),
             is_paused: false,
             window,
-            egui_state: egui_winit::State::new(event_loop),
-            egui_context: egui::Context::default(),
+            egui_state,
+            egui_viewport_id,
             _ground_handle: ground_handle,
             vehicle,
             cam_config: config.camera,
             spawn_pos,
         }
-    }
-
-    fn destroy(&mut self) {
-        self.engine.destroy();
     }
 
     fn set_velocity(&mut self, velocity: f32) {
@@ -286,10 +295,14 @@ impl Game {
         }
     }
 
-    fn teleport_object_rel(&mut self, handle: blade::ObjectHandle, transform: &nalgebra::Isometry3<f32>) {
+    fn teleport_object_rel(
+        &mut self,
+        handle: blade::ObjectHandle,
+        transform: &nalgebra::Isometry3<f32>,
+    ) {
         let prev = self.engine.get_object_isometry_approx(handle);
         let next = transform * prev;
-        self.engine.teleport_object(handle  , next);
+        self.engine.teleport_object(handle, next);
     }
 
     fn teleport(&mut self, position: nalgebra::Vector3<f32>) {
@@ -326,41 +339,44 @@ impl Game {
         }
     }
 
-    fn on_event(&mut self, event: &winit::event::WindowEvent) -> bool {
-        let response = self.egui_state.on_event(&self.egui_context, event);
-        if response.consumed {
-            return false;
-        }
+    fn on_event(
+        &mut self,
+        event: &winit::event::WindowEvent,
+    ) -> Result<winit::event_loop::ControlFlow, QuitEvent> {
+        let response = self.egui_state.on_window_event(&self.window, event);
         if response.repaint {
             self.window.request_redraw();
+        }
+        if response.consumed {
+            return Ok(winit::event_loop::ControlFlow::Poll);
         }
 
         match *event {
             winit::event::WindowEvent::KeyboardInput {
-                input:
-                    winit::event::KeyboardInput {
-                        virtual_keycode: Some(key_code),
+                event:
+                    winit::event::KeyEvent {
+                        physical_key: winit::keyboard::PhysicalKey::Code(key_code),
                         state: winit::event::ElementState::Pressed,
                         ..
                     },
                 ..
             } => match key_code {
-                winit::event::VirtualKeyCode::Escape => {
-                    return true;
+                winit::keyboard::KeyCode::Escape => {
+                    return Err(QuitEvent);
                 }
-                winit::event::VirtualKeyCode::Up => {
+                winit::keyboard::KeyCode::ArrowUp => {
                     self.set_velocity(100.0);
                 }
-                winit::event::VirtualKeyCode::Down => {
+                winit::keyboard::KeyCode::ArrowDown => {
                     self.set_velocity(-20.0);
                 }
-                winit::event::VirtualKeyCode::Left => {
+                winit::keyboard::KeyCode::ArrowLeft => {
                     self.set_steering(1.0);
                 }
-                winit::event::VirtualKeyCode::Right => {
+                winit::keyboard::KeyCode::ArrowRight => {
                     self.set_steering(-1.0);
                 }
-                winit::event::VirtualKeyCode::Comma => {
+                winit::keyboard::KeyCode::Comma => {
                     let forward = self
                         .engine
                         .get_object_isometry_approx(self.vehicle.body_handle)
@@ -370,7 +386,7 @@ impl Game {
                         -self.vehicle.roll_impulse * forward,
                     );
                 }
-                winit::event::VirtualKeyCode::Period => {
+                winit::keyboard::KeyCode::Period => {
                     let forward = self
                         .engine
                         .get_object_isometry_approx(self.vehicle.body_handle)
@@ -380,7 +396,7 @@ impl Game {
                         self.vehicle.roll_impulse * forward,
                     );
                 }
-                winit::event::VirtualKeyCode::Space => {
+                winit::keyboard::KeyCode::Space => {
                     let mut up = self
                         .engine
                         .get_object_isometry_approx(self.vehicle.body_handle)
@@ -392,28 +408,41 @@ impl Game {
                 _ => {}
             },
             winit::event::WindowEvent::KeyboardInput {
-                input:
-                    winit::event::KeyboardInput {
-                        virtual_keycode: Some(key_code),
+                event:
+                    winit::event::KeyEvent {
+                        physical_key: winit::keyboard::PhysicalKey::Code(key_code),
                         state: winit::event::ElementState::Released,
                         ..
                     },
                 ..
             } => match key_code {
-                winit::event::VirtualKeyCode::Up | winit::event::VirtualKeyCode::Down => {
+                winit::keyboard::KeyCode::ArrowUp | winit::keyboard::KeyCode::ArrowDown => {
                     self.set_velocity(0.0);
                 }
-                winit::event::VirtualKeyCode::Left | winit::event::VirtualKeyCode::Right => {
+                winit::keyboard::KeyCode::ArrowLeft | winit::keyboard::KeyCode::ArrowRight => {
                     self.set_steering(0.0);
                 }
                 _ => {}
             },
             winit::event::WindowEvent::CloseRequested => {
-                return true;
+                return Err(QuitEvent);
+            }
+            winit::event::WindowEvent::RedrawRequested => {
+                let wait = self.on_draw();
+
+                return Ok(
+                    if let Some(repaint_after_instant) = std::time::Instant::now().checked_add(wait)
+                    {
+                        winit::event_loop::ControlFlow::WaitUntil(repaint_after_instant)
+                    } else {
+                        winit::event_loop::ControlFlow::Wait
+                    },
+                );
             }
             _ => {}
         }
-        false
+
+        Ok(winit::event_loop::ControlFlow::Poll)
     }
 
     fn populate_hud(&mut self, ui: &mut egui::Ui) {
@@ -468,7 +497,11 @@ impl Game {
                             .translation
                             .vector;
                         let bounds = self.engine.get_object_bounds(self.vehicle.body_handle);
-                        self.teleport(pos + bounds.half_extents().component_mul(&nalgebra::Vector3::y_axis()));
+                        self.teleport(
+                            pos + bounds
+                                .half_extents()
+                                .component_mul(&nalgebra::Vector3::y_axis()),
+                        );
                     }
                     if ui.button("Respawn").clicked() {
                         self.teleport(self.spawn_pos);
@@ -489,7 +522,7 @@ impl Game {
         self.update_time();
 
         let raw_input = self.egui_state.take_egui_input(&self.window);
-        let egui_context = mem::take(&mut self.egui_context);
+        let egui_context = self.egui_state.egui_ctx().clone();
         let egui_output = egui_context.run(raw_input, |egui_ctx| {
             let frame = {
                 let mut frame = egui::Frame::side_top_panel(&egui_ctx.style());
@@ -505,13 +538,9 @@ impl Game {
                 .frame(frame)
                 .show(egui_ctx, |ui| self.populate_hud(ui));
         });
-        self.egui_context = egui_context;
 
-        self.egui_state.handle_platform_output(
-            &self.window,
-            &self.egui_context,
-            egui_output.platform_output,
-        );
+        self.egui_state
+            .handle_platform_output(&self.window, egui_output.platform_output);
 
         let camera = {
             let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
@@ -558,56 +587,47 @@ impl Game {
             }
         };
 
-        let primitives = self.egui_context.tessellate(egui_output.shapes);
+        let primitives = self
+            .egui_state
+            .egui_ctx()
+            .tessellate(egui_output.shapes, egui_output.pixels_per_point);
         self.engine.render(
             &camera,
             &primitives,
             &egui_output.textures_delta,
             self.window.inner_size(),
-            self.egui_context.pixels_per_point(),
+            self.window.scale_factor() as f32,
         );
 
-        egui_output.repaint_after
+        egui_output.viewport_output[&self.egui_viewport_id].repaint_delay
     }
 }
 
 fn main() {
     env_logger::init();
-    //let _ = profiling::tracy_client::Client::start();
-
-    let event_loop = winit::event_loop::EventLoop::new();
+    let event_loop = winit::event_loop::EventLoop::new().unwrap();
     let mut game = Game::new(&event_loop);
     let mut last_event = time::Instant::now();
 
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = winit::event_loop::ControlFlow::Poll;
-        let _delta = last_event.elapsed().as_secs_f32();
-        last_event = time::Instant::now();
+    event_loop
+        .run(|event, target| {
+            let _delta = last_event.elapsed().as_secs_f32();
+            last_event = time::Instant::now();
 
-        match event {
-            winit::event::Event::RedrawEventsCleared => {
-                game.window.request_redraw();
-            }
-            winit::event::Event::WindowEvent { event, .. } => {
-                if game.on_event(&event) {
-                    *control_flow = winit::event_loop::ControlFlow::Exit;
+            match event {
+                winit::event::Event::AboutToWait => {
+                    game.window.request_redraw();
                 }
+                winit::event::Event::WindowEvent { event, .. } => match game.on_event(&event) {
+                    Ok(control_flow) => {
+                        target.set_control_flow(control_flow);
+                    }
+                    Err(QuitEvent) => {
+                        target.exit();
+                    }
+                },
+                _ => {}
             }
-            winit::event::Event::RedrawRequested(_) => {
-                let wait = game.on_draw();
-
-                *control_flow = if let Some(repaint_after_instant) =
-                    std::time::Instant::now().checked_add(wait)
-                {
-                    winit::event_loop::ControlFlow::WaitUntil(repaint_after_instant)
-                } else {
-                    winit::event_loop::ControlFlow::Wait
-                };
-            }
-            winit::event::Event::LoopDestroyed => {
-                game.destroy();
-            }
-            _ => {}
-        }
-    })
+        })
+        .unwrap();
 }

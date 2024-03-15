@@ -12,14 +12,13 @@
                 half: (0.7, 0.2, 1.2),
             ),
         ),
-        height: 0.1,
     ),
     wheel: (
         visual: (
             model: "car-kit/wheelRacing.glb",
         ),
         collider: (
-            density: 400.0,
+            density: 100.0,
             friction: 1.0,
             pos: (0, 0, 0),
             rot: (0, 0, 90),
@@ -29,34 +28,40 @@
             ),
         ),
     ),
+    suspender: (
+        density: 100.0,
+        shape: Ball(
+            radius: 0.1,
+        ),
+    ),
     drive_factor: 15.0,
     jump_impulse: 10,
     roll_impulse: 10,
     axles: [
         (
-            xs: [-0.5, 0.5],
+            x_wheels: [-0.5, 0.5],
+            y: -0.1,
             z: 0.5,
-            additional_mass: Some((
-                density: 100.0,
-                shape: Cylinder(
-                    half_height: 0.2,
-                    radius: 0.1,
-                ),
-            )),
             suspension: (
-                limit: 0.5,
+                limit: 0.02,
                 stiffness: 100000,
                 damping: 10000,
             ),
             steering: (
                 limit: 30,
-                stiffness: 10000,
-                damping: 1000,
+                stiffness: 1000000,
+                damping: 100000,
             ),
         ),
         (
-            xs: [-0.5, 0.5],
+            x_wheels: [-0.5, 0.5],
+            y: -0.1,
             z: -1.0,
+            suspension: (
+                limit: 0.03,
+                stiffness: 100000,
+                damping: 10000,
+            ),
         ),
     ],
 )

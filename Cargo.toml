@@ -5,15 +5,14 @@ edition = "2021"
 
 [dependencies]
 blade = { path = "../blade" }
-egui = "0.23"
-egui-winit = "0.23"
+egui = "0.26"
+egui-winit = "0.26"
 env_logger = "0.10"
 nalgebra = { version = "0.32", features = ["mint"] }
 log = "0.4"
-rapier3d = "0.17"
+rapier3d = "0.18"
 ron = "0.8"
 serde = { version = "1", features = ["serde_derive"] }
-winit = "0.28"
+winit = "0.29"
 
 [patch.crates-io]
-rapier3d = { path = "../rapier/crates/rapier3d" }
