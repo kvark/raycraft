@@ -140,12 +140,12 @@ impl Game {
 
                 wheels.push(if ac.steering.limit > 0.0 || ac.suspension.limit > 0.0 {
                     let max_angle = ac.steering.limit.to_radians();
-                    let mut locked_axis = rapier3d::dynamics::JointAxesMask::LOCKED_FIXED_AXES;
+                    let mut locked_axes = rapier3d::dynamics::JointAxesMask::LOCKED_FIXED_AXES;
                     if ac.steering.limit > 0.0 {
-                        locked_axis ^= STEERING_AXIS.into();
+                        locked_axes ^= STEERING_AXIS.into();
                     }
                     if ac.suspension.limit > 0.0 {
-                        locked_axis ^= SUSPENSION_AXIS.into();
+                        locked_axes ^= SUSPENSION_AXIS.into();
                     }
 
                     let suspender_handle = engine.add_object(
@@ -157,7 +157,7 @@ impl Game {
                     let suspension_joint = engine.add_joint(
                         vehicle.body_handle,
                         suspender_handle,
-                        rapier3d::dynamics::GenericJointBuilder::new(locked_axis)
+                        rapier3d::dynamics::GenericJointBuilder::new(locked_axes)
                             .contacts_enabled(false)
                             .local_anchor1(offset.into())
                             .limits(SUSPENSION_AXIS, [0.0, ac.suspension.limit])
@@ -207,13 +207,13 @@ impl Game {
                         steer_joint: Some(suspension_joint),
                     }
                 } else {
-                    let locked_axis =
+                    let locked_axes =
                         rapier3d::dynamics::JointAxesMask::LOCKED_FIXED_AXES ^ SPIN_AXIS.into();
 
                     let wheel_joint = engine.add_joint(
                         vehicle.body_handle,
                         wheel_handle,
-                        rapier3d::dynamics::GenericJointBuilder::new(locked_axis)
+                        rapier3d::dynamics::GenericJointBuilder::new(locked_axes)
                             .contacts_enabled(false)
                             .local_anchor1(offset.into())
                             .local_frame2(nalgebra::Isometry3::rotation(rotation))

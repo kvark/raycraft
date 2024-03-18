@@ -2,22 +2,22 @@
     environment: "HDR_029_Sky_Cloudy_Ref.hdr",
     gravity: 9.81,
     average_luminocity: 0.1,
-    spawn_pos: (0, 20, 0),
+    spawn_pos: (0, 2, 0),
     ground: (
         name: "ground",
         visuals: [
             (
                 model: "ground.glb",
-                scale: 100,
+                pos: (0, 1, 0),
+                scale: 60,
             ),
         ],
         colliders: [
             (
-                density: 100000.0,
+                density: 1.0,
                 friction: 1.0,
-                pos: (0, -1, 0),
                 shape: Cuboid(
-                    half: (100000, 1, 100000),
+                    half: (1000, 1.0, 1000),
                 ),
             ),
         ],
