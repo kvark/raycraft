@@ -29,6 +29,7 @@
             ),
         ),
     ),
+    max_steer_angle: 30.0,
     drive_factor: 10.0,
     jump_impulse: 250,
     roll_impulse: 500,
@@ -44,9 +45,9 @@
                 ),
             )),
             steer: (
-                max_angle: 30,
                 stiffness: 20000,
                 damping: 10,
+                max_force: 1000,
             ),
         ),
         (

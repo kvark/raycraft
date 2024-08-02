@@ -10,13 +10,6 @@ pub struct Wheel {
     pub collider: blade::config::Collider,
 }
 
-#[derive(Default, serde::Deserialize)]
-pub struct Motor {
-    pub limit: f32,
-    pub stiffness: f32,
-    pub damping: f32,
-}
-
 #[derive(serde::Deserialize)]
 pub struct Axle {
     /// Side offset for each wheel.
@@ -26,9 +19,13 @@ pub struct Axle {
     /// Forward offset from the body.
     pub z: f32,
     #[serde(default)]
-    pub suspension: Motor,
+    pub max_steer_angle: f32,
     #[serde(default)]
-    pub steering: Motor,
+    pub max_suspension: f32,
+    #[serde(default)]
+    pub suspension: blade::config::Motor,
+    #[serde(default)]
+    pub steering: blade::config::Motor,
 }
 
 fn default_additional_mass() -> blade::config::AdditionalMass {

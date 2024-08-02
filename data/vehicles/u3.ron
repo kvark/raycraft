@@ -36,6 +36,7 @@
         (
             x: 9,
             z: 11,
+            max_steer_angle: 30.0,
             additional_mass: Some((
                 density: 100.0,
                 shape: Cylinder(
@@ -44,9 +45,9 @@
                 ),
             )),
             steer: (
-                max_angle: 30,
                 stiffness: 1000,
                 damping: 10,
+                max_force: 1000,
             ),
         ),
         //(

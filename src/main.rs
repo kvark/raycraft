@@ -1,6 +1,6 @@
 mod config;
 
-use std::{f32::consts, fs, mem, time};
+use std::{f32::consts, fs, mem, ops, time};
 
 #[derive(Clone)]
 struct Wheel {
@@ -12,12 +12,10 @@ struct Wheel {
 
 struct WheelAxle {
     wheels: Vec<Wheel>,
-    steer: Option<config::Motor>,
 }
 
 struct Vehicle {
     body_handle: blade::ObjectHandle,
-    drive_factor: f32,
     jump_impulse: f32,
     roll_impulse: f32,
     wheel_axles: Vec<WheelAxle>,
@@ -28,7 +26,7 @@ struct Game {
     engine: blade::Engine,
     last_physics_update: time::Instant,
     last_camera_update: time::Instant,
-    last_camera_base_quat: nalgebra::UnitQuaternion<f32>,
+    last_camera_base_quat: glam::Quat,
     is_paused: bool,
     // windowing
     window: winit::window::Window,
@@ -38,12 +36,47 @@ struct Game {
     _ground_handle: blade::ObjectHandle,
     vehicle: Vehicle,
     cam_config: config::Camera,
-    spawn_pos: nalgebra::Vector3<f32>,
+    spawn_pos: glam::Vec3,
 }
 
-const SUSPENSION_AXIS: rapier3d::dynamics::JointAxis = rapier3d::dynamics::JointAxis::Y;
-const STEERING_AXIS: rapier3d::dynamics::JointAxis = rapier3d::dynamics::JointAxis::AngY;
-const SPIN_AXIS: rapier3d::dynamics::JointAxis = rapier3d::dynamics::JointAxis::AngX;
+#[derive(Clone, Debug, PartialEq)]
+struct Isometry {
+    position: glam::Vec3,
+    orientation: glam::Quat,
+}
+impl From<blade::Transform> for Isometry {
+    fn from(transform: blade::Transform) -> Self {
+        Self {
+            position: transform.position.into(),
+            orientation: transform.orientation.into(),
+        }
+    }
+}
+impl Isometry {
+    fn inverse(&self) -> Self {
+        let orientation = self.orientation.inverse();
+        Self {
+            position: orientation * -self.position,
+            orientation,
+        }
+    }
+
+    fn to_blade(&self) -> blade::Transform {
+        blade::Transform {
+            position: self.position.into(),
+            orientation: self.orientation.into(),
+        }
+    }
+}
+impl ops::Mul<Isometry> for Isometry {
+    type Output = Self;
+    fn mul(self, other: Self) -> Self {
+        Self {
+            position: self.orientation * other.position + self.position,
+            orientation: self.orientation * other.orientation,
+        }
+    }
+}
 
 #[derive(Debug)]
 struct QuitEvent;
@@ -79,8 +112,8 @@ impl Game {
 
         let ground_handle = engine.add_object(
             &lev_config.ground,
-            nalgebra::Isometry3::default(),
-            blade::BodyType::Fixed,
+            blade::Transform::default(),
+            blade::DynamicInput::Empty,
         );
 
         let veh_config: config::Vehicle = ron::de::from_bytes(
@@ -94,14 +127,16 @@ impl Game {
             colliders: vec![veh_config.body.collider],
             additional_mass: None,
         };
-        let spawn_pos = nalgebra::Vector3::from(lev_config.spawn_pos);
+        let spawn_pos = glam::Vec3::from(lev_config.spawn_pos);
         let mut vehicle = Vehicle {
             body_handle: engine.add_object(
                 &body_config,
-                nalgebra::Isometry3::new(spawn_pos, nalgebra::Vector3::zeros()),
-                blade::BodyType::Dynamic,
+                blade::Transform {
+                    position: spawn_pos.into(),
+                    ..Default::default()
+                },
+                blade::DynamicInput::Full,
             ),
-            drive_factor: veh_config.drive_factor,
             jump_impulse: veh_config.jump_impulse,
             roll_impulse: veh_config.roll_impulse,
             wheel_axles: Vec::new(),
@@ -121,123 +156,143 @@ impl Game {
 
         //Note: in the vehicle coordinate system X=left, Y=up, Z=forward
         for ac in veh_config.axles {
-            let joint_kind = blade::JointKind::Soft;
+            let is_hard = false;
             let mut wheels = Vec::new();
 
             for wheel_x in ac.x_wheels {
-                let offset = nalgebra::Vector3::new(wheel_x, ac.y, ac.z);
+                let offset = glam::Vec3::new(wheel_x, ac.y, ac.z);
                 let rotation = if wheel_x > 0.0 {
-                    nalgebra::Vector3::y_axis().scale(consts::PI)
+                    glam::Quat::from_rotation_y(consts::PI)
                 } else {
-                    nalgebra::Vector3::zeros()
+                    glam::Quat::IDENTITY
                 };
 
                 let wheel_handle = engine.add_object(
                     &wheel_config,
-                    nalgebra::Isometry3::new(spawn_pos + offset, rotation),
-                    blade::BodyType::Dynamic,
+                    blade::Transform {
+                        position: (spawn_pos + offset).into(),
+                        orientation: rotation.into(),
+                    },
+                    blade::DynamicInput::Full,
                 );
+                let wheel_angular_freedoms = mint::Vector3 {
+                    x: Some(blade::FreedomAxis {
+                        limits: None,
+                        motor: Some(blade::config::Motor {
+                            stiffness: 0.0,
+                            damping: veh_config.drive_factor,
+                            max_force: 1000.0,
+                        }),
+                    }),
+                    y: None,
+                    z: None,
+                };
 
-                wheels.push(if ac.steering.limit > 0.0 || ac.suspension.limit > 0.0 {
-                    let max_angle = ac.steering.limit.to_radians();
-                    let mut locked_axes = rapier3d::dynamics::JointAxesMask::LOCKED_FIXED_AXES;
-                    if ac.steering.limit > 0.0 {
-                        locked_axes ^= STEERING_AXIS.into();
-                    }
-                    if ac.suspension.limit > 0.0 {
-                        locked_axes ^= SUSPENSION_AXIS.into();
-                    }
+                wheels.push(
+                    if ac.steering.stiffness != 0.0 || ac.suspension.stiffness != 0.0 {
+                        let max_angle = ac.max_steer_angle.to_radians();
+                        let suspender_handle = engine.add_object(
+                            &suspender_config,
+                            blade::Transform {
+                                position: (spawn_pos + offset).into(),
+                                ..Default::default()
+                            },
+                            blade::DynamicInput::Full,
+                        );
 
-                    let suspender_handle = engine.add_object(
-                        &suspender_config,
-                        nalgebra::Isometry3::new(spawn_pos + offset, nalgebra::Vector3::zeros()),
-                        blade::BodyType::Dynamic,
-                    );
+                        let suspension_joint = engine.add_joint(
+                            vehicle.body_handle,
+                            suspender_handle,
+                            blade::JointDesc {
+                                parent_anchor: blade::Transform {
+                                    position: offset.into(),
+                                    ..Default::default()
+                                },
+                                linear: mint::Vector3 {
+                                    x: None,
+                                    y: Some(blade::FreedomAxis {
+                                        limits: Some(0.0..ac.suspension.max_force),
+                                        motor: Some(ac.suspension),
+                                    }),
+                                    z: None,
+                                },
+                                angular: mint::Vector3 {
+                                    x: None,
+                                    y: Some(blade::FreedomAxis {
+                                        limits: Some(-max_angle..max_angle),
+                                        motor: Some(ac.steering),
+                                    }),
+                                    z: None,
+                                },
+                                allow_contacts: false,
+                                is_hard,
+                                ..Default::default()
+                            },
+                        );
 
-                    let suspension_joint = engine.add_joint(
-                        vehicle.body_handle,
-                        suspender_handle,
-                        rapier3d::dynamics::GenericJointBuilder::new(locked_axes)
-                            .contacts_enabled(false)
-                            .local_anchor1(offset.into())
-                            .limits(SUSPENSION_AXIS, [0.0, ac.suspension.limit])
-                            .motor_position(
-                                SUSPENSION_AXIS,
-                                0.0,
-                                ac.suspension.stiffness,
-                                ac.suspension.damping,
-                            )
-                            .limits(STEERING_AXIS, [-max_angle, max_angle])
-                            .motor_position(
-                                STEERING_AXIS,
-                                0.0,
-                                ac.steering.stiffness,
-                                ac.steering.damping,
-                            )
-                            .build(),
-                        joint_kind,
-                    );
+                        let wheel_joint = engine.add_joint(
+                            suspender_handle,
+                            wheel_handle,
+                            blade::JointDesc {
+                                child_anchor: blade::Transform {
+                                    orientation: rotation.into(),
+                                    ..Default::default()
+                                },
+                                angular: wheel_angular_freedoms,
+                                allow_contacts: false,
+                                is_hard,
+                                ..Default::default()
+                            },
+                        );
 
-                    let wheel_joint = engine.add_joint(
-                        suspender_handle,
-                        wheel_handle,
-                        rapier3d::dynamics::GenericJointBuilder::new(
-                            rapier3d::dynamics::JointAxesMask::LOCKED_REVOLUTE_AXES,
-                        )
-                        .contacts_enabled(false)
-                        .local_frame2(nalgebra::Isometry3::rotation(rotation))
-                        .build(),
-                        joint_kind,
-                    );
+                        let _extra_joint = engine.add_joint(
+                            vehicle.body_handle,
+                            wheel_handle,
+                            blade::JointDesc {
+                                linear: blade::FreedomAxis::ALL_FREE,
+                                angular: blade::FreedomAxis::ALL_FREE,
+                                allow_contacts: false,
+                                is_hard,
+                                ..Default::default()
+                            },
+                        );
 
-                    let _extra_joint = engine.add_joint(
-                        vehicle.body_handle,
-                        wheel_handle,
-                        rapier3d::dynamics::GenericJoint {
-                            contacts_enabled: false,
-                            ..Default::default()
-                        },
-                        joint_kind,
-                    );
+                        Wheel {
+                            object: wheel_handle,
+                            spin_joint: wheel_joint,
+                            suspender: Some(suspender_handle),
+                            steer_joint: Some(suspension_joint),
+                        }
+                    } else {
+                        let wheel_joint = engine.add_joint(
+                            vehicle.body_handle,
+                            wheel_handle,
+                            blade::JointDesc {
+                                parent_anchor: blade::Transform {
+                                    position: offset.into(),
+                                    ..Default::default()
+                                },
+                                child_anchor: blade::Transform {
+                                    orientation: rotation.into(),
+                                    ..Default::default()
+                                },
+                                angular: wheel_angular_freedoms,
+                                is_hard,
+                                ..Default::default()
+                            },
+                        );
 
-                    Wheel {
-                        object: wheel_handle,
-                        spin_joint: wheel_joint,
-                        suspender: Some(suspender_handle),
-                        steer_joint: Some(suspension_joint),
-                    }
-                } else {
-                    let locked_axes =
-                        rapier3d::dynamics::JointAxesMask::LOCKED_FIXED_AXES ^ SPIN_AXIS.into();
-
-                    let wheel_joint = engine.add_joint(
-                        vehicle.body_handle,
-                        wheel_handle,
-                        rapier3d::dynamics::GenericJointBuilder::new(locked_axes)
-                            .contacts_enabled(false)
-                            .local_anchor1(offset.into())
-                            .local_frame2(nalgebra::Isometry3::rotation(rotation))
-                            .build(),
-                        joint_kind,
-                    );
-
-                    Wheel {
-                        object: wheel_handle,
-                        spin_joint: wheel_joint,
-                        suspender: None,
-                        steer_joint: None,
-                    }
-                });
+                        Wheel {
+                            object: wheel_handle,
+                            spin_joint: wheel_joint,
+                            suspender: None,
+                            steer_joint: None,
+                        }
+                    },
+                );
             }
 
-            vehicle.wheel_axles.push(WheelAxle {
-                wheels,
-                steer: if ac.steering.limit > 0.0 {
-                    Some(ac.steering)
-                } else {
-                    None
-                },
-            });
+            vehicle.wheel_axles.push(WheelAxle { wheels });
         }
 
         let egui_context = egui::Context::default();
@@ -266,10 +321,11 @@ impl Game {
         self.update_time();
         for wax in self.vehicle.wheel_axles.iter() {
             for wheel in wax.wheels.iter() {
-                self.engine[wheel.spin_joint].set_motor_velocity(
-                    SPIN_AXIS,
+                self.engine.set_joint_motor(
+                    wheel.spin_joint,
+                    blade::JointAxis::AngularX,
+                    0.0,
                     velocity,
-                    self.vehicle.drive_factor,
                 );
             }
         }
@@ -278,46 +334,36 @@ impl Game {
     fn set_steering(&mut self, angle_rad: f32) {
         self.update_time();
         for wax in self.vehicle.wheel_axles.iter() {
-            let steer = match wax.steer {
-                Some(ref steer) => steer,
-                None => continue,
-            };
             for wheel in wax.wheels.iter() {
                 if let Some(handle) = wheel.steer_joint {
-                    self.engine[handle].set_motor_position(
-                        STEERING_AXIS,
-                        angle_rad,
-                        steer.stiffness,
-                        steer.damping,
-                    );
+                    self.engine
+                        .set_joint_motor(handle, blade::JointAxis::AngularY, angle_rad, 0.0);
                 }
             }
         }
     }
 
-    fn teleport_object_rel(
-        &mut self,
-        handle: blade::ObjectHandle,
-        transform: &nalgebra::Isometry3<f32>,
-    ) {
-        let prev = self.engine.get_object_isometry_approx(handle);
-        let next = transform * prev;
-        self.engine.teleport_object(handle, next);
+    fn teleport_object_rel(&mut self, handle: blade::ObjectHandle, isometry: &Isometry) {
+        let prev_transform = self
+            .engine
+            .get_object_transform(handle, blade::Prediction::LastKnown);
+        let next = isometry.clone() * Isometry::from(prev_transform);
+        self.engine.teleport_object(handle, next.to_blade());
     }
 
-    fn teleport(&mut self, position: nalgebra::Vector3<f32>) {
-        let old_isometry_inv = self
+    fn teleport(&mut self, position: glam::Vec3) {
+        let old_transform = self
             .engine
-            .get_object_isometry_approx(self.vehicle.body_handle)
-            .inverse();
-        let new_isometry = nalgebra::Isometry3 {
-            rotation: Default::default(),
-            translation: position.into(),
+            .get_object_transform(self.vehicle.body_handle, blade::Prediction::LastKnown);
+        let old_isometry_inv = Isometry::from(old_transform).inverse();
+        let new_transform = blade::Transform {
+            position: position.into(),
+            ..Default::default()
         };
         self.engine
-            .teleport_object(self.vehicle.body_handle, new_isometry);
+            .teleport_object(self.vehicle.body_handle, new_transform.clone());
 
-        let relative = new_isometry * old_isometry_inv;
+        let relative = Isometry::from(new_transform) * old_isometry_inv;
         let waxes = mem::take(&mut self.vehicle.wheel_axles);
         for wax in waxes.iter() {
             for wheel in wax.wheels.iter() {
@@ -377,33 +423,38 @@ impl Game {
                     self.set_steering(-1.0);
                 }
                 winit::keyboard::KeyCode::Comma => {
-                    let forward = self
-                        .engine
-                        .get_object_isometry_approx(self.vehicle.body_handle)
-                        .transform_vector(&nalgebra::Vector3::z_axis());
-                    self.engine.apply_torque_impulse(
+                    let transform = self.engine.get_object_transform(
                         self.vehicle.body_handle,
-                        -self.vehicle.roll_impulse * forward,
+                        blade::Prediction::LastKnown,
+                    );
+                    let forward = glam::Quat::from(transform.orientation) * glam::Vec3::Z;
+                    self.engine.apply_angular_impulse(
+                        self.vehicle.body_handle,
+                        (-self.vehicle.roll_impulse * forward).into(),
                     );
                 }
                 winit::keyboard::KeyCode::Period => {
-                    let forward = self
-                        .engine
-                        .get_object_isometry_approx(self.vehicle.body_handle)
-                        .transform_vector(&nalgebra::Vector3::z_axis());
-                    self.engine.apply_torque_impulse(
+                    let transform = self.engine.get_object_transform(
                         self.vehicle.body_handle,
-                        self.vehicle.roll_impulse * forward,
+                        blade::Prediction::LastKnown,
+                    );
+                    let forward = glam::Quat::from(transform.orientation) * glam::Vec3::Z;
+                    self.engine.apply_angular_impulse(
+                        self.vehicle.body_handle,
+                        (self.vehicle.roll_impulse * forward).into(),
                     );
                 }
                 winit::keyboard::KeyCode::Space => {
-                    let mut up = self
-                        .engine
-                        .get_object_isometry_approx(self.vehicle.body_handle)
-                        .transform_vector(&nalgebra::Vector3::y_axis());
+                    let transform = self.engine.get_object_transform(
+                        self.vehicle.body_handle,
+                        blade::Prediction::LastKnown,
+                    );
+                    let mut up = glam::Quat::from(transform.orientation) * glam::Vec3::Y;
                     up.y = up.y.abs();
-                    self.engine
-                        .apply_impulse(self.vehicle.body_handle, self.vehicle.jump_impulse * up);
+                    self.engine.apply_linear_impulse(
+                        self.vehicle.body_handle,
+                        (self.vehicle.jump_impulse * up).into(),
+                    );
                 }
                 _ => {}
             },
@@ -464,12 +515,12 @@ impl Game {
                     ui.label("Angle");
                     ui.add(
                         egui::DragValue::new(&mut self.cam_config.azimuth)
-                            .clamp_range(-consts::PI..=consts::PI)
+                            .range(-consts::PI..=consts::PI)
                             .speed(0.1),
                     );
                     ui.add(
                         egui::DragValue::new(&mut self.cam_config.altitude)
-                            .clamp_range(eps..=consts::FRAC_PI_2 - eps)
+                            .range(eps..=consts::FRAC_PI_2 - eps)
                             .speed(0.1),
                     );
                 });
@@ -491,17 +542,13 @@ impl Game {
                 });
                 ui.horizontal(|ui| {
                     if ui.button("Recover").clicked() {
-                        let pos = self
-                            .engine
-                            .get_object_isometry_approx(self.vehicle.body_handle)
-                            .translation
-                            .vector;
-                        let bounds = self.engine.get_object_bounds(self.vehicle.body_handle);
-                        self.teleport(
-                            pos + bounds
-                                .half_extents()
-                                .component_mul(&nalgebra::Vector3::y_axis()),
+                        let transform = self.engine.get_object_transform(
+                            self.vehicle.body_handle,
+                            blade::Prediction::LastKnown,
                         );
+                        let pos = glam::Vec3::from(transform.position);
+                        let bounds = self.engine.get_object_bounds(self.vehicle.body_handle);
+                        self.teleport(pos + glam::Vec3::from(bounds.half) * glam::Vec3::Y);
                     }
                     if ui.button("Respawn").clicked() {
                         self.teleport(self.spawn_pos);
@@ -543,47 +590,44 @@ impl Game {
             .handle_platform_output(&self.window, egui_output.platform_output);
 
         let camera = {
-            let veh_isometry = self.engine.get_object_isometry(self.vehicle.body_handle);
-            // Projection of the rotation of the vehicle on the Y axis
-            let projection = veh_isometry
-                .rotation
-                .quaternion()
-                .imag()
-                .dot(&nalgebra::Vector3::y_axis());
-            let base_quat_nonorm = nalgebra::Quaternion::from_parts(
-                veh_isometry.rotation.quaternion().w,
-                nalgebra::Vector3::y_axis().scale(projection),
+            let veh_transform = self.engine.get_object_transform(
+                self.vehicle.body_handle,
+                blade::Prediction::IntegrateVelocityAndForces,
             );
-            let validity = base_quat_nonorm.norm();
-            let base_quat = nalgebra::UnitQuaternion::new_normalize(base_quat_nonorm);
+            let veh_isometry = Isometry::from(veh_transform);
+            // Projection of the rotation of the vehicle on the Y axis
+            let projection = veh_isometry.orientation.xyz().dot(glam::Vec3::Y);
+            let base_quat_nonorm =
+                glam::Quat::from_xyzw(0.0, projection, 0.0, veh_isometry.orientation.w);
+            let validity = base_quat_nonorm.length();
+            let base_quat = base_quat_nonorm / validity;
 
             let camera_dt = self.last_camera_update.elapsed().as_secs_f32();
             self.last_physics_update = time::Instant::now();
 
             let cc = &self.cam_config;
             let smooth_t = (-camera_dt * cc.speed * validity).exp();
-            let smooth_quat = nalgebra::UnitQuaternion::new_normalize(
-                base_quat.lerp(&self.last_camera_base_quat, smooth_t),
-            );
-            let base =
-                nalgebra::geometry::Isometry3::from_parts(veh_isometry.translation, smooth_quat);
+            let smooth_quat = base_quat.lerp(self.last_camera_base_quat, smooth_t);
+            let base = Isometry {
+                position: veh_isometry.position,
+                orientation: smooth_quat,
+            };
             self.last_camera_base_quat = smooth_quat;
 
-            //TODO: `nalgebra::Point3::from(mint::Vector3)` doesn't exist?
-            let source = nalgebra::Vector3::from(cc.target)
-                + nalgebra::Vector3::new(
-                    -cc.azimuth.sin() * cc.altitude.cos(),
-                    cc.altitude.sin(),
-                    -cc.azimuth.cos() * cc.altitude.cos(),
-                )
-                .scale(cc.distance);
-            let local = nalgebra::geometry::Isometry3::look_at_rh(
-                &source.into(),
-                &nalgebra::Vector3::from(cc.target).into(),
-                &nalgebra::Vector3::y_axis(),
-            );
-            blade::Camera {
-                isometry: base * local.inverse(),
+            let source = glam::Vec3::from(cc.target)
+                + cc.distance
+                    * glam::Vec3::new(
+                        -cc.azimuth.sin() * cc.altitude.cos(),
+                        cc.altitude.sin(),
+                        -cc.azimuth.cos() * cc.altitude.cos(),
+                    );
+            let local_affine = glam::Affine3A::look_at_rh(source, cc.target.into(), glam::Vec3::Y);
+            let local = Isometry {
+                position: local_affine.translation.into(),
+                orientation: glam::Quat::from_affine3(&local_affine),
+            };
+            blade::FrameCamera {
+                transform: (base * local.inverse()).to_blade(),
                 fov_y: cc.fov,
             }
         };
